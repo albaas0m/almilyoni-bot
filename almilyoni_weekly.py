@@ -344,6 +344,11 @@ def cmd_close_day(a, data):
         if 'opt_usd' not in rec:
             rec.update(strike=None, expiry=None, opt_usd=None, opt_pct=None, exit_price_source='ما توفر سعر أبيان')
         if q:
+            for k in ('strike', 'expiry', 'opt_symbol', 'opt_day_vol', 'bucket'):
+                if q.get(k) is not None and rec.get(k) is None: rec[k] = q[k]
+            if q.get('note'): rec['exit_price_source'] = q['note']
+            if q.get('vix_chg_pct') is not None:
+                v = float(q['vix_chg_pct']); rec['vix_skip'] = v >= VIX_SPIKE if t['side'] == 'C' else v <= -VIX_SPIKE
             if q.get('ema200_ok') is not None: rec['ema200_ok'] = bool(q['ema200_ok'])
             if q.get('exit50_usd') is not None: rec['exit50_usd'] = q['exit50_usd']
         apply_filters(rec)
@@ -362,6 +367,7 @@ def apply_filters(rec):
         rec['time_value'] = round(tv, 2)
         if tv > TV_MAX_ADR * rec['adr']: skip.append('عقد غالي')
     if rec.get('opt_day_vol') is not None and float(rec['opt_day_vol']) < MIN_OPT_VOL: skip.append('سيولة ضعيفة')
+    elif rec.get('opt_usd') is None and 'سيولة' in rec.get('exit_price_source', ''): skip.append('العقد ما تداول')
     rec['skip'] = '، '.join(skip)
     rec['drtip_skip'] = bool(rec.get('before10')) or rec.get('ema200_ok') is False
 
