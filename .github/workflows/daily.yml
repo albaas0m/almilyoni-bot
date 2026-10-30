@@ -1,0 +1,35 @@
+name: almilyoni-daily
+# كل يوم تداول بعد إغلاق السوق الأمريكي: يحدّث الشموع ويسجل صفقات اليوم بأسعار العقود الحقيقية في paper.json
+on:
+  schedule:
+    - cron: '30 21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'أيام معيّنة YYYY-MM-DD مفصولة بفاصلة (فاضي = اليوم)'
+        required: false
+        default: ''
+      since:
+        description: 'أو كل الأيام من تاريخ YYYY-MM-DD لين اليوم (آخر 30 يوم بس)'
+        required: false
+        default: ''
+permissions:
+  contents: write
+concurrency: almilyoni
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: جلب الأسعار الحقيقية والتسجيل
+        run: python3 fetch_real.py --days "${{ github.event.inputs.days }}" --since "${{ github.event.inputs.since }}"
+      - name: حفظ في الريبو
+        run: |
+          git config user.name "almilyoni-bot"
+          git config user.email "almilyoni-bot@users.noreply.github.com"
+          git add data paper.json
+          git diff --cached --quiet || git commit -m "تسجيل يومي بأسعار حقيقية $(date -u +%F)"
+          git push
