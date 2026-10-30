@@ -1,0 +1,37 @@
+name: almilyoni-weekly
+# كل سبت 8 الصبح بتوقيت الرياض: ملخص الأسبوع من paper.json (أسعار حقيقية بس) في reports/
+on:
+  schedule:
+    - cron: '0 5 * * 6'
+  workflow_dispatch:
+    inputs:
+      week:
+        description: 'أي يوم في الأسبوع المطلوب YYYY-MM-DD (فاضي = الأسبوع اللي خلص)'
+        required: false
+        default: ''
+permissions:
+  contents: write
+concurrency: almilyoni
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: الملخص
+        run: |
+          W="${{ github.event.inputs.week }}"
+          if [ -z "$W" ]; then W=$(date -u -d 'yesterday' +%F); fi
+          mkdir -p reports
+          python3 almilyoni_weekly.py paper-week --state paper.json --week "$W" > "reports/week-$W.md"
+          cp "reports/week-$W.md" reports/latest.md
+          cat reports/latest.md >> "$GITHUB_STEP_SUMMARY"
+      - name: حفظ في الريبو
+        run: |
+          git config user.name "almilyoni-bot"
+          git config user.email "almilyoni-bot@users.noreply.github.com"
+          git add reports
+          git diff --cached --quiet || git commit -m "ملخص أسبوعي $(date -u +%F)"
+          git push
