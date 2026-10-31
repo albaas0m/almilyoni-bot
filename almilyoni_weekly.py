@@ -30,11 +30,13 @@ from zoneinfo import ZoneInfo
 TRADE_SYMBOLS = ['NVDA', 'AAPL', 'AMD', 'AVGO', 'TSLA', 'LRCX', 'TSM', 'ARM']   # الأسهم الحلال اللي لها عقود في أبيان (توسعة 24 أكتوبر)
 SYMBOLS = TRADE_SYMBOLS + ['SPY']   # SPY للفلتر فقط (فوق VWAP)، ما يتداول
 STEP = 900; NY = ZoneInfo('America/New_York'); RY = ZoneInfo('Asia/Riyadh')
-TGT, STP, VOLX, WIN_MIN, COST_PCT = 1.0, 3.0, 1.2, 120, 0.03
+TGT, STP, VOLX, WIN_MIN, COST_PCT = 2.0, 3.0, 1.2, 120, 0.03
 LATE_MIN, VOLX_LATE = 330, 2.0   # بعد أول ساعتين وحتى 3:00 نيويورك: تنقبل الإشارة بس إذا الحجم ≥ 2× المتوسط (قرار المستخدم 10 أكتوبر 2026)
 BUDGET, COMM, RATE = 1000.0, 0.995, 0.04   # 1000$ عقد واحد = الأساس (قرار 28 أكتوبر)
 CMP_BUDGETS = (500.0, 800.0)                # للمقارنة فقط، و"2×500" = عقدين كل واحد ≤ 500$
-DTE_MIN = 14                                # أقرب جمعة بعد 14 يوم أو أكثر
+DTE_MIN = 14                                # قرار 31 أكتوبر: أقرب تاريخ انتهاء لـ14 يوم (أكثر أو أقل عادي)
+DTE_LO, DTE_HI = 10, 21                     # المدى المقبول لمدة العقد
+PREM_MIN = 100.0                            # قرار 31 أكتوبر: العقد من 100$ إلى 1000$ (BUDGET = الحد الأعلى)
 EMA_D, ADR_N = 50, 14                        # EMA50 اليومي (عكس الترند) ومتوسط المدى اليومي (فلتر العقد الغالي)
 TV_MAX_ADR = 1.0                             # القيمة الزمنية للسهم ≤ 1× المدى اليومي، وإلا غالي
 MIN_OPT_VOL = 100                            # أقل حجم تداول يومي للعقد (فلتر السيولة)
@@ -201,7 +203,8 @@ def intrinsic(side, S, K):
 def expiry_for(t0, dte=DTE_MIN):
     """أقرب جمعة تبعد dte يوم أو أكثر."""
     d0 = datetime.fromtimestamp(t0, NY); tgt = d0.date() + timedelta(days=dte)
-    tgt += timedelta(days=(4 - tgt.weekday()) % 7)
+    back = tgt - timedelta(days=(tgt.weekday() - 4) % 7); fwd = tgt + timedelta(days=(4 - tgt.weekday()) % 7)
+    tgt = back if (tgt - back) <= (fwd - tgt) and (back - d0.date()).days >= DTE_LO else fwd   # أقرب جمعة لـ14 يوم
     return datetime(tgt.year, tgt.month, tgt.day, 16, 0, tzinfo=NY)
 
 
@@ -213,7 +216,7 @@ def option_estimate(e, px, atr, iv, t0, t1, side=1, dte=DTE_MIN, budget=BUDGET, 
     K = round(e / inc) * inc; step = inc if side == 1 else -inc     # كول يبعد لفوق، بوت يبعد لتحت
     for _ in range(40):
         mid0 = bs_price(side, e, K, T0, iv); ask = mid0 + max(0.01 * mid0, 0.02)
-        if ask * 100 + COMM <= budget: break
+        if PREM_MIN <= ask * 100 and ask * 100 + COMM <= budget: break
         K += step
     else:
         return dict(strike=None, premium=None, opt_usd=None, opt_pct=None, expensive=None)
@@ -297,9 +300,9 @@ def cmd_plan(a, data):
     for n, t in enumerate(ts):
         min_exp = (datetime.fromtimestamp(t['t_entry'], NY).date() + timedelta(days=DTE_MIN)).isoformat()
         u = lambda x: datetime.fromtimestamp(x, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        rule = ('أول جمعة انتهاء >= min_expiry، ثم ' +
-                ('أصغر سترايك >= سعر الدخول، وإذا fmv×100 > 995 انتقل للسترايك الأعلى' if t['side'] == 'C' else
-                 'أكبر سترايك <= سعر الدخول، وإذا fmv×100 > 995 انتقل للسترايك الأقل') +
+        rule = ('تاريخ الانتهاء الأقرب لـ14 يوم (بين 10 و21 يوم) من قائمة أبيان، ثم ' +
+                ('أصغر سترايك >= سعر الدخول، وإذا fmv×100 خارج 100–995 انتقل للسترايك الأعلى' if t['side'] == 'C' else
+                 'أكبر سترايك <= سعر الدخول، وإذا fmv×100 خارج 100–995 انتقل للسترايك الأقل') +
                 '. سجّل opt_day_vol (حجم العقد اليومي) لفلتر السيولة، وema200_ok (السعر مع EMA200 على 1د و5د) لمقارنة Dr Tip، وexit50_usd لو انضرب ±50% قبل الخروج')
         out.append(dict(id=f"{a.day}-{t['symbol']}-{n}", symbol=t['symbol'], side=t['side'], entry=t['entry'], target=t['target'], stop=t['stop'],
                         exit=t['exit'], why=t['why'], min_expiry=min_exp, adr=t['adr'], before10=t['before10'],
