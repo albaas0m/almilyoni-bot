@@ -24,6 +24,7 @@ import almilyoni_weekly as m
 ROOT = Path(__file__).resolve().parent
 DATA, STATE = ROOT / 'data', ROOT / 'paper.json'
 UA = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'}
+MAX_STRIKES = 4   # نجرب 4 سترايكات بس، بعدها نعتبره سيولة ضعيفة (توفير)
 FILL_WIN = 600   # أقصى فرق (ثواني) بين وقت الدخول/الخروج وأقرب صفقة على العقد
 NY = m.NY
 
@@ -144,13 +145,13 @@ def price_trade(tr, day, stock1m, vix_chg):
         q['ema200_ok'] = (e > e1 and e > e5) if side == 'C' else (e < e1 and e < e5)
     if vix_chg is not None: q['vix_chg_pct'] = vix_chg
     tried = 0
-    while tried < 25:
+    while tried < MAX_STRIKES:
         tried += 1
         sym = occ(tr['symbol'], exp, side, K)
         bs = minute_bars(sym, day)
         if bs:
             ref = last_before(bs, tr['t_entry'], 6 * 3600) or first_after(bs, tr['t_entry'])
-            if ref and ref['c'] * 100 + m.COMM <= m.BUDGET:
+            if ref and m.PREM_MIN <= ref['c'] * 100 and ref['c'] * 100 + m.COMM <= m.BUDGET:   # العقد من 100$ إلى 1000$
                 q.update(strike=K, opt_symbol=sym, opt_day_vol=sum(b['v'] for b in bs))
                 fe = first_after(bs, tr['t_entry'])
                 tx = exit_minute(tr, stock1m)
