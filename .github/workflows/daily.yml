@@ -1,8 +1,7 @@
 name: almilyoni-daily
 # كل يوم تداول بعد إغلاق السوق الأمريكي: يحدّث الشموع ويسجل صفقات اليوم بأسعار العقود الحقيقية في paper.json
+# متوقف (31 أكتوبر 2026): كان يجيب الأسعار من ياهو. البديل: مهمة Claude المجدولة (CLOUD_TASK.md) من TradingView + أبيان
 on:
-  schedule:
-    - cron: '30 21 * * 1-5'
   workflow_dispatch:
     inputs:
       days:
