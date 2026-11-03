@@ -458,6 +458,45 @@
     "over_budget": false,
     "opt_usd_worst": -28
    }
+  },
+  {
+   "id": "2026-11-02-TSM-0",
+   "day": "2026-11-02",
+   "symbol": "TSM",
+   "side": "C",
+   "t_entry": 1793632500,
+   "t_exit": 1793651400,
+   "entry": 408.4,
+   "target": 414.91,
+   "stop": 398.63,
+   "exit": 398.63,
+   "why": "وقف",
+   "stock_pct": -2.423,
+   "prev_buy_vol_pct": 45.5,
+   "ema50d": 433.57,
+   "adr": 11.318,
+   "before10": false,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": -395.0,
+   "vix_skip": false,
+   "strike": 415.0,
+   "expiry": "2026-11-13",
+   "premium": 900,
+   "exit_premium": 664,
+   "opt_usd": -238,
+   "opt_pct": -26.4,
+   "exit_price_source": "سعر العقد الحقيقي (TradingView)",
+   "over_budget": false,
+   "opt_usd_worst": -238,
+   "opt_exit_t": 1793652060,
+   "opt_symbol": "TSM261113C00415000",
+   "opt_day_vol": 4,
+   "bucket": "14",
+   "time_value": 9.0,
+   "skip": "سيولة ضعيفة",
+   "drtip_skip": false
   }
  ],
  "days": {
@@ -488,6 +527,10 @@
   "2026-10-30": {
    "n": 0,
    "updated": "2026-10-31 04:04"
+  },
+  "2026-11-02": {
+   "n": 1,
+   "updated": "2026-11-03 19:19"
   }
  }
 }
