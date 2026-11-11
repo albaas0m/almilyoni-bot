@@ -3,7 +3,8 @@
 المصدر: Yahoo Finance (مجاني، بدون اشتراك):
   1) يحدّث شموع 15 دقيقة للأسهم وSPY في data/
   2) يطلع صفقات اليوم من الاستراتيجية (نفس كود almilyoni_weekly.py)
-  3) لكل صفقة: يختار العقد بنفس القاعدة (أقرب جمعة بعد 14 يوم+، أقرب سترايك للسعر يكون ≤ الميزانية)
+  3) لكل صفقة: يختار العقد (أقرب جمعة بعد 14 يوم+، وأي سترايك ولو بعيد عن السعر سعره بين 100$ و1000$؛
+     يبدأ من أقرب سترايك للسعر، وإذا غالي أو رخيص يحسب التذبذب من سعر العقد الحقيقي ويقفز للسترايك المناسب)
      ويجيب سعره الحقيقي من صفقات العقد نفسه دقيقة بدقيقة: لحظة الدخول ولحظة الخروج
   4) يسجل في paper.json (والملخص الأسبوعي يقرأ منه)
 
@@ -24,7 +25,9 @@ import almilyoni_weekly as m
 ROOT = Path(__file__).resolve().parent
 DATA, STATE = ROOT / 'data', ROOT / 'paper.json'
 UA = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36'}
-MAX_STRIKES = 4   # نجرب 4 سترايكات بس، بعدها نعتبره سيولة ضعيفة (توفير)
+MAX_STRIKES = 6   # أقصى عدد سترايكات نجربها (قرار 11 نوفمبر: أي سترايك ولو بعيد عن السعر، المهم العقد 100–1000$ ويتحرك)
+PREM_TGT_HI = 0.9 * (m.BUDGET - m.COMM)   # العقد غالي: نقفز لأقرب سترايك سعره المتوقع ~900$ (الأقرب للسعر يتحرك أكثر)
+PREM_TGT_LO = 1.5 * m.PREM_MIN            # العقد أرخص من 100$: نقرّب للسعر لين ~150$
 FILL_WIN = 600   # أقصى فرق (ثواني) بين وقت الدخول/الخروج وأقرب صفقة على العقد
 NY = m.NY
 
@@ -130,6 +133,18 @@ def exit_minute(tr, stock1m):
     return tr['t_exit']
 
 
+def jump_strike(side, S, K, T, iv, inc, too_expensive):
+    """أول سترايك سعره المتوقع (بتذبذب العقد الحقيقي) يدخل الميزانية: نبعد عن السعر إذا غالي، ونقرّب إذا رخيص."""
+    d = (1 if side == 'C' else -1) * (1 if too_expensive else -1)
+    k = K
+    for _ in range(400):
+        k = round(k + d * inc, 2)
+        if k <= 0: return None
+        v = m.bs_price(side, S, k, T, iv) * 100
+        if (too_expensive and v <= PREM_TGT_HI) or (not too_expensive and v >= PREM_TGT_LO): return k
+    return None
+
+
 def price_trade(tr, day, stock1m, vix_chg):
     side, e = tr['side'], tr['entry']
     exp = next_friday(tr['min_expiry'])
@@ -144,31 +159,37 @@ def price_trade(tr, day, stock1m, vix_chg):
     if e1 and e5:
         q['ema200_ok'] = (e > e1 and e > e5) if side == 'C' else (e < e1 and e < e5)
     if vix_chg is not None: q['vix_chg_pct'] = vix_chg
-    tried = 0
-    while tried < MAX_STRIKES:
-        tried += 1
+    seen = set()
+    while len(seen) < MAX_STRIKES and K > 0 and K not in seen:
+        seen.add(K)
         sym = occ(tr['symbol'], exp, side, K)
         bs = minute_bars(sym, day)
-        if bs:
-            ref = last_before(bs, tr['t_entry'], 6 * 3600) or first_after(bs, tr['t_entry'])
-            if ref and m.PREM_MIN <= ref['c'] * 100 and ref['c'] * 100 + m.COMM <= m.BUDGET:   # العقد من 100$ إلى 1000$
-                q.update(strike=K, opt_symbol=sym, opt_day_vol=sum(b['v'] for b in bs))
-                fe = first_after(bs, tr['t_entry'])
-                tx = exit_minute(tr, stock1m)
-                fx = (last_before(bs, tr['t_exit'] + 899, 900) if tr['why'] == 'نهاية الجلسة'
-                      else first_after(bs, tx) or last_before(bs, tx, 300))
-                if not fe or not fx or fx['t'] < fe['t']:
-                    q['note'] = 'العقد ما تداول وقت ' + ('الدخول' if not fe else 'الخروج') + ' (سيولة ضعيفة)'
-                    return q
-                q.update(opt_entry=fe['c'], opt_exit=fx['c'], opt_entry_hi=fe['h'], opt_exit_lo=fx['l'],
-                         opt_entry_t=fe['t'], opt_exit_t=fx['t'])
-                # مقارنة: خروج ±50% من سعر العقد قبل الخروج الأصلي
-                for b in bs:
-                    if fe['t'] < b['t'] < fx['t'] and b['v'] > 0:
-                        if b['h'] >= 1.5 * fe['c']: q['exit50_usd'] = m._pnl(fe['c'], 1.5 * fe['c'])[0]; break
-                        if b['l'] <= 0.5 * fe['c']: q['exit50_usd'] = m._pnl(fe['c'], 0.5 * fe['c'])[0]; break
+        ref = (last_before(bs, tr['t_entry'], 6 * 3600) or first_after(bs, tr['t_entry'])) if bs else None
+        if ref and m.PREM_MIN <= ref['c'] * 100 and ref['c'] * 100 + m.COMM <= m.BUDGET:   # العقد من 100$ إلى 1000$
+            q.update(strike=K, opt_symbol=sym, opt_day_vol=sum(b['v'] for b in bs))
+            fe = first_after(bs, tr['t_entry'])
+            tx = exit_minute(tr, stock1m)
+            fx = (last_before(bs, tr['t_exit'] + 899, 900) if tr['why'] == 'نهاية الجلسة'
+                  else first_after(bs, tx) or last_before(bs, tx, 300))
+            if not fe or not fx or fx['t'] < fe['t']:
+                q['note'] = 'العقد ما تداول وقت ' + ('الدخول' if not fe else 'الخروج') + ' (سيولة ضعيفة)'
                 return q
-        K += step
+            q.update(opt_entry=fe['c'], opt_exit=fx['c'], opt_entry_hi=fe['h'], opt_exit_lo=fx['l'],
+                     opt_entry_t=fe['t'], opt_exit_t=fx['t'])
+            # مقارنة: خروج ±50% من سعر العقد قبل الخروج الأصلي
+            for b in bs:
+                if fe['t'] < b['t'] < fx['t'] and b['v'] > 0:
+                    if b['h'] >= 1.5 * fe['c']: q['exit50_usd'] = m._pnl(fe['c'], 1.5 * fe['c'])[0]; break
+                    if b['l'] <= 0.5 * fe['c']: q['exit50_usd'] = m._pnl(fe['c'], 0.5 * fe['c'])[0]; break
+            return q
+        if not ref:                     # السترايك ما تداول أو مو موجود: نجرب اللي بعده
+            K = round(K + step, 2); continue
+        # السعر الحقيقي خارج 100–1000$: نحسب تذبذب العقد من سعره الحقيقي ونقفز مباشرة للسترايك المناسب
+        too_exp = ref['c'] * 100 + m.COMM > m.BUDGET
+        T = m.yearfrac(ref['t'], exp.isoformat())
+        iv = m.implied_vol(ref['c'], e, K, T, side)
+        nk = jump_strike(side, e, K, T, iv, inc, too_exp) if iv else None
+        K = nk if nk else round(K + (step if too_exp else -step), 2)
     q['note'] = 'ما لقيت عقد ضمن الميزانية له تداول'
     return q
 

@@ -16,8 +16,9 @@ DIR فيه ملفات {SYMBOL}-15m.json من موصل TradingView (حقل bars: 
 هدف 1 ATR، وقف 3 ATR (لمسهما معًا = وقف)، وإلا خروج آخر شمعة في الجلسة. صفقة وحدة لكل سهم في نفس الوقت.
 EMA50 اليومي محسوب من إغلاقات الجلسات السابقة فقط (بدون نظر للمستقبل).
 
-تقدير العقد (ليس سعرًا حقيقيًا): أقرب جمعة تبعد 14 يوم أو أكثر، سترايك ATM،
-وإذا العقد أغلى من الميزانية (1000$) ينتقل لسترايك أبعد (OTM) لين يصير ضمنها.
+تقدير العقد (ليس سعرًا حقيقيًا): أقرب جمعة تبعد 14 يوم أو أكثر، يبدأ من سترايك ATM،
+وإذا العقد أغلى من الميزانية (1000$) ينتقل لسترايك أبعد (OTM) لين يصير ضمنها، وإذا أرخص من 100$ يقرّب للسعر.
+قرار 11 نوفمبر 2026: ما فيه حد لبعد السترايك عن السعر، أي عقد بين 100$ و1000$ مقبول ما دام يتحرك (فلتر السيولة).
 العقد الغالي = القيمة الزمنية للسهم الواحد أكبر من متوسط مدى السهم اليومي (14 جلسة) → الصفقة تتجاهل.
 السيولة الضعيفة = حجم تداول العقد في اليوم أقل من 100 عقد (لما يتوفر السعر الحقيقي) → الصفقة تتجاهل.
 التسعير Black-Scholes بتذبذب = التذبذب الفعلي لآخر 20 جلسة × 0.81 (معايَر على أسعار أبيان، حد أدنى 12%)، سبريد 1% لكل جهة (حد أدنى 0.02$)، وعمولة 0.995$ لكل أمر.
@@ -214,11 +215,17 @@ def option_estimate(e, px, atr, iv, t0, t1, side=1, dte=DTE_MIN, budget=BUDGET, 
     T1 = max((exp - datetime.fromtimestamp(t1, NY)).total_seconds() / (365 * 86400), 0)
     inc = 1.0 if e < 300 else 5.0
     K = round(e / inc) * inc; step = inc if side == 1 else -inc     # كول يبعد لفوق، بوت يبعد لتحت
-    for _ in range(40):
+    went = 0                                                        # قرار 11 نوفمبر: أي سترايك ولو بعيد، المهم 100$–الميزانية
+    for _ in range(200):
         mid0 = bs_price(side, e, K, T0, iv); ask = mid0 + max(0.01 * mid0, 0.02)
         if PREM_MIN <= ask * 100 and ask * 100 + COMM <= budget: break
-        K += step
+        d = 1 if ask * 100 + COMM > budget else -1                  # غالي → نبعد عن السعر، أرخص من 100$ → نقرّب
+        if went and d != went: break                                 # ما فيه سترايك بينهم يدخل المدى
+        went = d; K += d * step
+        if K <= 0: break
     else:
+        K = None
+    if K is None or K <= 0 or not (PREM_MIN <= ask * 100 and ask * 100 + COMM <= budget):
         return dict(strike=None, premium=None, opt_usd=None, opt_pct=None, expensive=None)
     tv = mid0 - intrinsic(side, e, K)
     mid1 = bs_price(side, px, K, T1, iv); bid = max(mid1 - max(0.01 * mid1, 0.02), 0)
@@ -301,8 +308,8 @@ def cmd_plan(a, data):
         min_exp = (datetime.fromtimestamp(t['t_entry'], NY).date() + timedelta(days=DTE_MIN)).isoformat()
         u = lambda x: datetime.fromtimestamp(x, timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
         rule = ('تاريخ الانتهاء الأقرب لـ14 يوم (بين 10 و21 يوم) من قائمة أبيان، ثم ' +
-                ('أصغر سترايك >= سعر الدخول، وإذا fmv×100 خارج 100–995 انتقل للسترايك الأعلى' if t['side'] == 'C' else
-                 'أكبر سترايك <= سعر الدخول، وإذا fmv×100 خارج 100–995 انتقل للسترايك الأقل') +
+                ('ابدأ بأصغر سترايك >= سعر الدخول' if t['side'] == 'C' else 'ابدأ بأكبر سترايك <= سعر الدخول') +
+                '، وإذا fmv×100 فوق 995 ابعد عن السعر وإذا تحت 100 قرّب، بدون حد لبعد السترايك (أي عقد 100–995 يتحرك مقبول)' +
                 '. سجّل opt_day_vol (حجم العقد اليومي) لفلتر السيولة، وema200_ok (السعر مع EMA200 على 1د و5د) لمقارنة Dr Tip، وexit50_usd لو انضرب ±50% قبل الخروج')
         out.append(dict(id=f"{a.day}-{t['symbol']}-{n}", symbol=t['symbol'], side=t['side'], entry=t['entry'], target=t['target'], stop=t['stop'],
                         exit=t['exit'], why=t['why'], min_expiry=min_exp, adr=t['adr'], before10=t['before10'],
