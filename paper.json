@@ -1089,6 +1089,45 @@
    "bucket": "14",
    "skip": "",
    "drtip_skip": true
+  },
+  {
+   "id": "2026-11-12-NVDA-0",
+   "day": "2026-11-12",
+   "symbol": "NVDA",
+   "side": "C",
+   "t_entry": 1794497400,
+   "t_exit": 1794516300,
+   "entry": 165.07,
+   "target": 172.17,
+   "stop": 154.41,
+   "exit": 166.04,
+   "why": "نهاية الجلسة",
+   "stock_pct": 0.561,
+   "prev_buy_vol_pct": 47.5,
+   "ema50d": 210.41,
+   "adr": 6.973,
+   "before10": false,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": 32.0,
+   "vix_skip": false,
+   "strike": 167.5,
+   "expiry": "2026-11-25",
+   "premium": 840,
+   "exit_premium": 879,
+   "opt_usd": 37,
+   "opt_pct": 4.4,
+   "exit_price_source": "سعر العقد الحقيقي (TradingView)",
+   "over_budget": false,
+   "opt_usd_worst": 37,
+   "opt_exit_t": 1794517140,
+   "opt_symbol": "NVDA261125C00167500",
+   "opt_day_vol": 17,
+   "bucket": "14",
+   "time_value": 8.4,
+   "skip": "عقد غالي، سيولة ضعيفة",
+   "drtip_skip": false
   }
  ],
  "days": {
@@ -1151,6 +1190,10 @@
   "2026-11-11": {
    "n": 0,
    "updated": "2026-11-12 00:43"
+  },
+  "2026-11-12": {
+   "n": 1,
+   "updated": "2026-11-13 00:43"
   }
  }
 }
