@@ -25,7 +25,8 @@ jobs:
           W="${{ github.event.inputs.week }}"
           if [ -z "$W" ]; then W=$(date -u -d 'yesterday' +%F); fi
           mkdir -p reports
-          python3 almilyoni_weekly.py paper-week --state paper.json --week "$W" > "reports/week-$W.md"
+          python3 almilyoni_weekly.py live-week --state paper.json --week "$W" > "reports/week-$W.md"        # التقرير النظيف (أسعار أبيان اللحظية)
+          python3 almilyoni_weekly.py paper-week --state paper.json --week "$W" > "reports/details-week-$W.md"  # التفاصيل والمقارنات
           cp "reports/week-$W.md" reports/latest.md
           cat reports/latest.md >> "$GITHUB_STEP_SUMMARY"
       - name: حفظ في الريبو

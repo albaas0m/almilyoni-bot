@@ -540,7 +540,53 @@ def cmd_paper_week(a, _data):
     print('\n'.join(L))
 
 
-SUB = {'plan': cmd_plan, 'close-day': cmd_close_day, 'reprice': cmd_reprice, 'brief': cmd_brief, 'paper-week': cmd_paper_week}
+def cmd_live_week(a, _data):
+    """التقرير الأسبوعي النظيف (قرار 14 نوفمبر): كل صفقة بسعر العقد من أبيان لحظة الدخول ولحظة الخروج."""
+    lp = Path(a.state).parent / 'live.json'
+    tr = json.loads(lp.read_text())['trades'] if lp.exists() else []
+    day = date.fromisoformat(a.week) if a.week else datetime.now(NY).date()
+    mon = day - timedelta(days=day.weekday()); fri = mon + timedelta(days=4)
+    ts = sorted([t for t in tr if str(mon) <= t['day'] <= str(fri)], key=lambda t: t['t_entry'])
+    DAYS = ['الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد']
+    def tm(x):
+        d = datetime.fromtimestamp(x, RY); h = d.hour % 12 or 12
+        return f"{h}:{d.minute:02d}{'م' if d.hour >= 12 else 'ص'}"
+    WHY = {'هدف': '🎯 ضرب الهدف', 'وقف': '🛑 ضرب الوقف', 'نهاية الجلسة': '⏰ نهاية الجلسة', 'بدون عقد': '—'}
+    done = [t for t in ts if t.get('opt_usd') is not None]
+    tot = sum(t['opt_usd'] for t in done); wins = sum(t['opt_usd'] > 0 for t in done)
+    L = [f'# تقرير المليوني — أسبوع {mon:%d/%m} إلى {fri:%d/%m/%Y}', '']
+    if not ts:
+        L.append('ما طلعت أي صفقة هذا الأسبوع (الشروط ما اكتملت).')
+    else:
+        v = 'نجح لأن الربح' if tot > 0 else 'فشل لأن الخسارة'
+        L += [f'## {v} {tot:+,.0f}$', f'{len(done)} صفقة: ✅ ربحت {wins} — ❌ خسرت {len(done) - wins}', '',
+              'كل الأسعار من **أبيان** لحظة الدخول ولحظة الخروج (عقد واحد، شامل العمولة). الوقت بتوقيت الرياض.', '',
+              '| # | اليوم | السهم | النوع | العقد | سعر العقد عند الدخول | وش صار | سعر العقد عند الخروج | الربح / الخسارة |',
+              '|---|---|---|---|---|---:|---|---:|---:|']
+        for n, t in enumerate(ts, 1):
+            d = datetime.fromtimestamp(t['t_entry'], RY)
+            kind = 'CALL 📈' if t['side'] == 'C' else 'PUT 📉'
+            if not t.get('strike'):
+                L.append(f"|{n}|{DAYS[d.weekday()]} {d:%d/%m}|{t['symbol']}|{kind}|ما لقى عقد|—|—|—|—|"); continue
+            ex = datetime.fromisoformat(t['expiry'])
+            con = f"{t['strike']:g} ينتهي {ex:%d/%m}"
+            pin = f"{t['opt_entry'] * 100:,.0f}$ ({tm(t['opt_entry_at'])})"
+            if not t.get('t_exit'):
+                L.append(f"|{n}|{DAYS[d.weekday()]} {d:%d/%m}|{t['symbol']}|{kind}|{con}|{pin}|مفتوحة|—|—|"); continue
+            pout = f"{t['opt_exit'] * 100:,.0f}$ ({tm(t['t_exit'])})" if t.get('opt_exit') is not None else 'ما رجع سعر'
+            res = '—'
+            if t.get('opt_usd') is not None:
+                pct = 100 * t['opt_usd'] / (t['opt_entry'] * 100 + COMM)
+                res = f"{'✅' if t['opt_usd'] > 0 else '❌'} {t['opt_usd']:+,.0f}$ ({pct:+.0f}%)"
+            L.append(f"|{n}|{DAYS[d.weekday()]} {d:%d/%m}|{t['symbol']}|{kind}|{con}|{pin}|{WHY.get(t['why'], t['why'])}|{pout}|{res}|")
+    alld = [t for t in tr if t.get('opt_usd') is not None]
+    if alld:
+        L += ['', f"**من بداية التسجيل اللحظي بأسعار أبيان:** {sum(t['opt_usd'] for t in alld):+,.0f}$ على {len(alld)} صفقة، ربحت {sum(t['opt_usd'] > 0 for t in alld)}."]
+    print('\n'.join(L))
+
+
+SUB = {'plan': cmd_plan, 'close-day': cmd_close_day, 'reprice': cmd_reprice, 'brief': cmd_brief, 'paper-week': cmd_paper_week,
+       'live-week': cmd_live_week}
 
 
 def main():
