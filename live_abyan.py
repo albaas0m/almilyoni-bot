@@ -135,6 +135,8 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument('--once', action='store_true'); ap.add_argument('--test', nargs=2)
     a = ap.parse_args()
     if a.test:   # اختبار: سعر السهم واختيار العقد من أبيان
+        t0 = time.time(); update_tv(time.time())
+        log('شموع TradingView: آخر شمعة', f.load_data()[a.test[0]][-1], f'({time.time() - t0:.1f} ثانية)')
         t0 = time.time(); S = stock_px(a.test[0]); c = pick_contract(a.test[0], a.test[1], S, time.time())
         log(a.test, 'السهم', S, '← العقد', c and (c[0].isoformat(), c[1], f'{c[2] * 100:.0f}$'), f'({time.time() - t0:.1f} ثانية)')
         save(load(), 'لحظي: اختبار'); return
