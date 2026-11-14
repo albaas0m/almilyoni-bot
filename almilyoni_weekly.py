@@ -326,8 +326,16 @@ def cmd_close_day(a, data):
     st = load_state(a.state); brief = st['briefs'].get(a.day, {})
     flags = brief.get('flags', {}); caution = brief.get('market_caution', False)
     st['trades'] = [x for x in st['trades'] if x.get('day') != a.day]
+    lp = Path(a.state).parent / 'live.json'      # أسعار أبيان اللحظية (live_abyan.py) لها الأولوية
+    live = {(x['symbol'], x['t_entry']): x for x in (json.loads(lp.read_text())['trades'] if lp.exists() else [])
+            if x.get('opt_entry') and x.get('opt_exit') is not None}
     for n, t in enumerate(ts):
         tid = f"{a.day}-{t['symbol']}-{n}"; q = quotes.get(tid)
+        lv = live.get((t['symbol'], t['t_entry']))
+        if lv:
+            q = dict(id=tid, strike=lv['strike'], expiry=lv['expiry'], opt_entry=lv['opt_entry'], opt_exit=lv['opt_exit'],
+                     price_note='سعر أبيان اللحظي (دخول وخروج)', bucket='14')
+            t = dict(t, exit=round(lv['exit'], 2), why=lv['why'], t_exit=lv['t_exit'])
         rec = dict(id=tid, day=a.day, **{k: t[k] for k in ['symbol', 'side', 't_entry', 't_exit', 'entry', 'target', 'stop', 'exit', 'why',
                                                            'stock_pct', 'prev_buy_vol_pct', 'ema50d', 'adr', 'before10']},
                    news_skip=bool(flags.get(t['symbol'], {}).get('skip')), news_reason=flags.get(t['symbol'], {}).get('reason', ''),
@@ -499,7 +507,7 @@ def cmd_paper_week(a, _data):
         L.append('ما فيه صفقات هذا الأسبوع (ما اكتملت الشروط).')
     else:
         v = 'نجح لأن الربح' if tot > 0 else 'فشل لأن الخسارة'
-        nreal = sum('TradingView' in t.get('exit_price_source', '') for t in priced)
+        nreal = sum(('TradingView' in t.get('exit_price_source', '') or 'أبيان' in t.get('exit_price_source', '')) for t in priced)
         L.append(f"**العقود: {v} {tot:+.0f}$** — {len(priced)} صفقة ({nreal} منها بسعر العقد الحقيقي دخول وخروج)، نجح منها {wins}.")
         wr = [t for t in priced if t.get('opt_usd_worst') is not None]
         if wr:

@@ -1,0 +1,28 @@
+name: almilyoni-live
+# وقت السوق الأمريكي (أيام التداول): البوت يراقب الإشارات ويسجل سعر العقد من أبيان لحظة الدخول والخروج — بدون Claude
+# جوبين ورا بعض (كل جوب حده 6 ساعات): الثاني ينتظر في الطابور لين يخلص الأول ويكمل لين الإغلاق
+on:
+  schedule:
+    - cron: '0 13 * * 1-5'
+    - cron: '0 14 * * 1-5'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: almilyoni-live
+  cancel-in-progress: false
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -q cryptography
+      - name: المراقبة اللحظية
+        env:
+          ABYAN_KEY: ${{ secrets.ABYAN_KEY }}
+        run: |
+          git config user.name "almilyoni-bot"; git config user.email "almilyoni-bot@users.noreply.github.com"
+          python3 live_abyan.py
