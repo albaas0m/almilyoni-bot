@@ -1,0 +1,13 @@
+name: tv-probe
+on: workflow_dispatch
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          B=https://mcp.tradingview.com
+          for p in .well-known/oauth-protected-resource .well-known/oauth-protected-resource/mcp .well-known/oauth-authorization-server .well-known/openid-configuration; do
+            echo "=== $p"; curl -sS -m 20 "$B/$p" | head -c 2500; echo; done
+          echo "=== POST /mcp"
+          curl -sS -m 20 -i -X POST $B/mcp -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+            -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"almilyoni-bot","version":"1"}}}' | head -c 1500
