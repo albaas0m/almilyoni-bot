@@ -14,6 +14,7 @@ from datetime import datetime, date, timedelta
 import almilyoni_weekly as m
 import fetch_real as f
 import abyan
+import tv
 
 ROOT = Path(__file__).resolve().parent; LIVE = ROOT / 'live.json'; NY = m.NY
 MAX_STRIKES, JOB_SEC = 15, 5 * 3600 + 50 * 60
@@ -30,7 +31,7 @@ def load():
 def save(st, msg):
     LIVE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
     try:   # نحفظ في الريبو على طول (عشان لو الجوب انقطع ما يضيع شي)
-        subprocess.run('git add live.json abyan_token.enc && git commit -qm "' + msg + '" && '
+        subprocess.run('git add live.json abyan_token.enc tv_token.enc && git commit -qm "' + msg + '" && '
                        'git pull -q --rebase origin main && git push -q', shell=True, cwd=ROOT, timeout=90)
     except Exception as e: log('git:', e)
 
@@ -73,8 +74,21 @@ def pick_contract(sym, side, S, now):
 
 
 # ───────── الإشارات ─────────
+def update_tv(now):
+    """شموع 15د من حساب أحمد في TradingView (المكتملة بس)، تندمج مع ملفات data/."""
+    for s in m.SYMBOLS:
+        new = [b for b in tv.bars(s, '15m', 60) if b['t'] + 900 <= now]
+        p = f.DATA / f'{s}-15m.json'; old = json.loads(p.read_text())
+        first = new[0]['t'] if new else 1e12
+        old['bars'] = [b for b in old['bars'] if b['t'] < first] + new
+        old.update(count=len(old['bars']), source_note='TradingView (حساب أحمد) — لحظي')
+        p.write_text(json.dumps(old, separators=(',', ':')))
+
+
 def new_signals(now):
-    f.update_data()                                   # شموع 15د مكتملة بس
+    try: update_tv(now)                               # المصدر الأساسي: حسابك في TradingView
+    except Exception as e:
+        log('TradingView ما رد، أستخدم ياهو هالمرة:', e); f.update_data()
     data = f.load_data()
     t_next = (int(now) // 900) * 900                  # الشمعة اللي بدت الحين = شمعة الدخول
     for s in m.SYMBOLS:                               # شمعة دخول مؤقتة بسعر أبيان الحين (الاستراتيجية تدخل افتتاح الشمعة التالية)

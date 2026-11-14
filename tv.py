@@ -118,7 +118,7 @@ def call(tool, args):
 
 EXCH = {'NVDA': 'NASDAQ', 'AAPL': 'NASDAQ', 'AMD': 'NASDAQ', 'AVGO': 'NASDAQ', 'TSLA': 'NASDAQ', 'LRCX': 'NASDAQ',
         'ARM': 'NASDAQ', 'TSM': 'NYSE', 'SPY': 'AMEX', 'VIX': 'CBOE'}
-OHLCV = 'get_ohlcv'
+OHLCV = 'mcp-tv-get-ohlcv'
 
 
 def tools():
