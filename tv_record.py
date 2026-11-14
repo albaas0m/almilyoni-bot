@@ -69,11 +69,24 @@ def minute_bars(sym, day):
 
 
 CUR = {}
-def pick_expiry(min_expiry):  # أقرب تاريخ أبيان لـ14 يوم (10–21 يوم)
+def expiry_list(min_expiry):  # تواريخ أبيان مرتبة من الأقرب لـ14 يوم (10–21 أول، وإذا ما فيه نوسع 7–35)
     exps = [date.fromisoformat(x) for x in load(f"{CUR['sym']}-expiries.json")['expiration_dates']]
-    d0 = CUR['day']; ok = [x for x in exps if m.DTE_LO <= (x - d0).days <= m.DTE_HI]
-    if not ok: raise RuntimeError(f"ما فيه عقد في أبيان مدته 10–21 يوم لـ {CUR['sym']}")
-    return min(ok, key=lambda x: abs((x - d0).days - m.DTE_MIN))
+    d0 = CUR['day']; key = lambda x: abs((x - d0).days - m.DTE_MIN)
+    main = sorted([x for x in exps if m.DTE_LO <= (x - d0).days <= m.DTE_HI], key=key)
+    extra = sorted([x for x in exps if 7 <= (x - d0).days <= 35 and x not in main], key=key)
+    if not main + extra: raise RuntimeError(f"ما فيه عقد في أبيان مدته 7–35 يوم لـ {CUR['sym']}")
+    return main + extra
+
+
+def wide_bars(sym, day):
+    """العقد ما تداول بالضبط وقت الخروج: نجيب شموعه من الدخول لين الإغلاق ونختار أقرب صفقة حقيقية."""
+    tr = CUR['tr']; occ = tv_symbol(sym) if len(sym) > 12 else sym
+    a = tr['t_entry']; d = datetime.fromtimestamp(a, NY); b = int(d.replace(hour=16, minute=0, second=0).timestamp())
+    name = f"{occ}-1m-wide-{a}.json"; p = CACHE / name
+    if not p.exists():
+        NEED.append(dict(file=name, tool='get_ohlcv', symbol=occ, interval='1m', date_from=_iso(a), date_to=_iso(b),
+                         format='columns', count=400)); raise Missing(name)
+    return bars_of(json.loads(p.read_text()), 60)
 
 
 def vix_change(day, t_entry):
@@ -117,7 +130,9 @@ def run(day, merge=True):
     return [(q['id'], q.get('opt_symbol'), q.get('opt_entry'), q.get('opt_exit'), q.get('note', '')) for q in quotes]
 
 
-f.minute_bars = minute_bars; f.next_friday = pick_expiry; f.vix_change = vix_change
+f.minute_bars = minute_bars; f.expiry_list = expiry_list; f.wide_bars = wide_bars; f.vix_change = vix_change
+f.VOL_MINUTES = 35                      # نافذتين: 10 دقائق عند الدخول + 25 عند الخروج
+f.WIDE_MINUTES = lambda tr: (int(datetime.fromtimestamp(tr['t_entry'], NY).replace(hour=16, minute=0, second=0).timestamp()) - tr['t_entry']) // 60
 f.occ = lambda sym, exp, side, K: f"{sym}{exp:%y%m%d}{side}{int(round(K * 1000)):08d}"
 def _opt_bars(sym, day):     # العقود: الملف باسم OPRA
     return minute_bars(tv_symbol(sym) if len(sym) > 12 else sym, day)

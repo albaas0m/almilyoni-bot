@@ -354,7 +354,7 @@ def cmd_close_day(a, data):
         if 'opt_usd' not in rec:
             rec.update(strike=None, expiry=None, opt_usd=None, opt_pct=None, exit_price_source='ما توفر سعر أبيان')
         if q:
-            for k in ('strike', 'expiry', 'opt_symbol', 'opt_day_vol', 'bucket'):
+            for k in ('strike', 'expiry', 'opt_symbol', 'opt_day_vol', 'opt_vol_minutes', 'bucket'):
                 if q.get(k) is not None and rec.get(k) is None: rec[k] = q[k]
             if q.get('note'): rec['exit_price_source'] = q['note']
             if q.get('vix_chg_pct') is not None:
@@ -376,7 +376,9 @@ def apply_filters(rec):
         tv = rec['premium'] / 100 - intrinsic(rec.get('side', 'C'), rec['entry'], rec['strike'])
         rec['time_value'] = round(tv, 2)
         if tv > TV_MAX_ADR * rec['adr']: skip.append('عقد غالي')
-    if rec.get('opt_day_vol') is not None and float(rec['opt_day_vol']) < MIN_OPT_VOL: skip.append('سيولة ضعيفة')
+    # الحجم أحيانًا لنافذة قصيرة حول الدخول والخروج (TradingView) مو اليوم كامل، فالحد يتناسب مع عدد الدقائق
+    vmin = MIN_OPT_VOL * min(float(rec.get('opt_vol_minutes') or 390), 390) / 390
+    if rec.get('opt_day_vol') is not None and float(rec['opt_day_vol']) < vmin: skip.append('سيولة ضعيفة')
     elif rec.get('opt_usd') is None and 'سيولة' in rec.get('exit_price_source', ''): skip.append('العقد ما تداول')
     rec['skip'] = '، '.join(skip)
     rec['drtip_skip'] = bool(rec.get('before10')) or rec.get('ema200_ok') is False
@@ -397,8 +399,9 @@ def apply_real(rec, q):
                opt_usd=usd, opt_pct=pct, exit_price_source='سعر العقد الحقيقي (TradingView)', over_budget=cost > BUDGET)
     if q.get('opt_entry_hi') and q.get('opt_exit_lo') is not None:
         rec['opt_usd_worst'] = _pnl(float(q['opt_entry_hi']), float(q['opt_exit_lo']))[0]
-    for k in ('fmv', 'opt_exit_t', 'opt_symbol', 'opt_day_vol'):
+    for k in ('fmv', 'opt_exit_t', 'opt_symbol', 'opt_day_vol', 'opt_vol_minutes'):
         if q.get(k) is not None: rec[{'fmv': 'close_fmv'}.get(k, k)] = q[k]
+    if q.get('price_note'): rec['exit_price_source'] = q['price_note']
     a = q.get('alt14')
     if a and a.get('opt_entry') and a.get('opt_exit') is not None:
         au, ap, ac = _pnl(float(a['opt_entry']), float(a['opt_exit']))
