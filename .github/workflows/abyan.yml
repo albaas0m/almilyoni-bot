@@ -1,0 +1,35 @@
+name: abyan
+# ربط البوت بأبيان مباشرة (OAuth) واختبار سعر عقد
+on:
+  workflow_dispatch:
+    inputs:
+      action: {description: 'start / finish / price', required: true, default: 'start'}
+      code: {description: 'لـ finish: الرابط اللي وصلت له بعد الدخول', required: false, default: ''}
+      args: {description: 'لـ price: مثال AMD 2026-11-27 put 495', required: false, default: 'AMD 2026-11-27 put 495'}
+permissions:
+  contents: write
+concurrency: almilyoni
+jobs:
+  abyan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -q cryptography
+      - name: أبيان
+        env:
+          ABYAN_KEY: ${{ secrets.ABYAN_KEY }}
+          CODE: ${{ github.event.inputs.code }}
+        run: |
+          case "${{ github.event.inputs.action }}" in
+            start) python3 abyan.py start ;;
+            finish) python3 abyan.py finish --code "$CODE" ;;
+            price) python3 abyan.py price ${{ github.event.inputs.args }} ;;
+          esac
+      - name: حفظ
+        run: |
+          git config user.name "almilyoni-bot"; git config user.email "almilyoni-bot@users.noreply.github.com"
+          git add -A abyan_client.json abyan_token.enc 2>/dev/null || true
+          git diff --cached --quiet || git commit -m "أبيان: ربط/تجديد التوكن (مشفّر)"
+          git push
