@@ -19,7 +19,7 @@ MCP_URLS = (BASE + '/', BASE + '/mcp/')
 
 def _key():
     k = os.environ.get('ABYAN_KEY', '')
-    if len(k) < 16: sys.exit('ABYAN_KEY ناقص: أضفه في GitHub ← Settings ← Secrets and variables ← Actions')
+    if len(k) < 6: sys.exit(f'ABYAN_KEY ناقص أو قصير ({len(k)} حرف): أضفه في GitHub ← Settings ← Secrets and variables ← Actions')
     return hashlib.sha256(k.encode()).digest()
 
 
