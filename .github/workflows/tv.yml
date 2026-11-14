@@ -1,0 +1,35 @@
+name: tradingview
+# ربط البوت بحساب TradingView مباشرة (OAuth) واختبار الشموع
+on:
+  workflow_dispatch:
+    inputs:
+      action: {description: 'start / finish / bars', required: true, default: 'start'}
+      code: {description: 'لـ finish: الرابط اللي وصلت له بعد الدخول', required: false, default: ''}
+      args: {description: 'لـ bars: مثال AMD', required: false, default: 'AMD'}
+permissions:
+  contents: write
+concurrency: almilyoni
+jobs:
+  tv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -q cryptography
+      - name: TradingView
+        env:
+          ABYAN_KEY: ${{ secrets.ABYAN_KEY }}
+          CODE: ${{ github.event.inputs.code }}
+        run: |
+          case "${{ github.event.inputs.action }}" in
+            start) python3 tv.py start ;;
+            finish) python3 tv.py finish --code "$CODE" ;;
+            bars) python3 tv.py bars ${{ github.event.inputs.args }} ;;
+          esac
+      - name: حفظ
+        run: |
+          git config user.name "almilyoni-bot"; git config user.email "almilyoni-bot@users.noreply.github.com"
+          for f in tv_client.json tv_token.enc; do [ -f $f ] && git add $f; done; true
+          git diff --cached --quiet || git commit -m "TradingView: ربط/تجديد التوكن (مشفّر)"
+          git push

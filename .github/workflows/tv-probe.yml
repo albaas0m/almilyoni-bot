@@ -1,9 +1,0 @@
-name: tv-probe
-on: workflow_dispatch
-jobs:
-  probe:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          for u in https://www.tradingview.com/.well-known/oauth-authorization-server https://www.tradingview.com/.well-known/openid-configuration https://www.tradingview.com/.well-known/oauth-authorization-server/mcp; do
-            echo "=== $u"; curl -sS -m 20 -A 'almilyoni-bot/1' "$u" | head -c 3000; echo; done
