@@ -6,6 +6,8 @@ on:
     - cron: '0 13 * * 1-5'
     - cron: '0 14 * * 1-5'
   workflow_dispatch:
+    inputs:
+      test: {description: 'اختبار: سهم واتجاه مثل AMD P (فاضي = تشغيل عادي)', required: false, default: ''}
 permissions:
   contents: write
 concurrency:
@@ -25,4 +27,4 @@ jobs:
           ABYAN_KEY: ${{ secrets.ABYAN_KEY }}
         run: |
           git config user.name "almilyoni-bot"; git config user.email "almilyoni-bot@users.noreply.github.com"
-          python3 live_abyan.py
+          if [ -n "${{ github.event.inputs.test }}" ]; then python3 live_abyan.py --test ${{ github.event.inputs.test }}; else python3 live_abyan.py; fi
