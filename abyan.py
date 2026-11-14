@@ -11,7 +11,7 @@ import os, sys, json, time, hmac, hashlib, base64, secrets, argparse, urllib.par
 from pathlib import Path
 
 BASE = 'https://mcp.abyancapital.sa'
-REDIRECT = 'http://localhost:8765/callback'
+REDIRECT = 'https://github.com/albaas0m/almilyoni-bot'   # صفحة عادية: الكود يبان في الرابط بعد الموافقة
 ROOT = Path(__file__).resolve().parent
 CLIENT, TOKEN = ROOT / 'abyan_client.json', ROOT / 'abyan_token.enc'
 MCP_URLS = (BASE + '/', BASE + '/mcp/')
@@ -68,8 +68,8 @@ def _save(tok):
 
 def finish(code):
     if 'code=' in code: code = urllib.parse.parse_qs(urllib.parse.urlparse(code).query)['code'][0]
-    cid = json.loads(CLIENT.read_text())['client_id']
-    st, _, b = _post(BASE + '/oauth/token', dict(grant_type='authorization_code', code=code.strip(), redirect_uri=REDIRECT,
+    c = json.loads(CLIENT.read_text()); cid = c['client_id']
+    st, _, b = _post(BASE + '/oauth/token', dict(grant_type='authorization_code', code=code.strip(), redirect_uri=c['redirect_uri'],
                      client_id=cid, code_verifier=_verifier(cid), resource=BASE))
     if st >= 300: sys.exit(f'أبيان رفض الكود ({st}): {b[:300]}')
     tok = json.loads(b); _save(tok)
