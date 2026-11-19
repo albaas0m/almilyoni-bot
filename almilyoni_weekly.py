@@ -28,7 +28,9 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta, date
 from zoneinfo import ZoneInfo
 
-TRADE_SYMBOLS = ['NVDA', 'AAPL', 'AMD', 'AVGO', 'TSLA', 'LRCX', 'TSM', 'ARM']   # الأسهم الحلال اللي لها عقود في أبيان (توسعة 24 أكتوبر)
+# قرار 19 نوفمبر 2026: توب 4 بالسيولة والحركة (متوسط تداول يومي آخر 20 يوم: NVDA 8.6B، TSLA 6.2B، AAPL 4.6B، AMD 4.5B)
+# الباقي مؤجل: 'AVGO', 'LRCX', 'TSM', 'ARM' — يوفر طلبات TradingView (5 بدل 9 كل 15 دقيقة)
+TRADE_SYMBOLS = ['NVDA', 'TSLA', 'AAPL', 'AMD']
 SYMBOLS = TRADE_SYMBOLS + ['SPY']   # SPY للفلتر فقط (فوق VWAP)، ما يتداول
 STEP = 900; NY = ZoneInfo('America/New_York'); RY = ZoneInfo('Asia/Riyadh')
 TGT, STP, VOLX, WIN_MIN, COST_PCT = 2.0, 3.0, 1.2, 120, 0.03
