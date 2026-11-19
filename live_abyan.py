@@ -145,14 +145,18 @@ def main():
         t0 = time.time(); S = stock_px(a.test[0]); c = pick_contract(a.test[0], a.test[1], S, time.time())
         log(a.test, 'السهم', S, '← العقد', c and (c[0].isoformat(), c[1], f'{c[2] * 100:.0f}$'), f'({time.time() - t0:.1f} ثانية)')
         save(load(), 'لحظي: اختبار'); return
-    st = load(); last_bar = None
+    global TV_QUOTA
+    st = load(); last_bar = None; closed = None
     while True:
         now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570
-        if d.weekday() >= 5 or mins >= 392 or time.time() - T0 > JOB_SEC:
-            if d.weekday() < 5 and mins < 392:          # حد الجوب (6 ساعات) والسوق لسا ما سكر: نشغّل جوب ثاني يكمل
-                (ROOT / '.again').write_text('1'); log('حد الجوب: جوب ثاني بيكمل')
-            log('خلص الوقت'); save(st, 'لحظي: نهاية الجوب', data=mins >= 392); break
-        if mins < -2: time.sleep(60); continue
+        if time.time() - T0 > JOB_SEC:
+            # (19 نوفمبر) مواعيد GitHub تتأخر ساعات، فالبوت ما يعتمد عليها: كل جوب يشغّل اللي بعده على طول،
+            # فيكون فيه دايم جوب ينتظر الافتتاح أو يراقب السوق
+            (ROOT / '.again').write_text('1'); log('حد الجوب: جوب ثاني بيكمل'); save(st, 'لحظي: نهاية الجوب'); break
+        if d.weekday() >= 5 or mins >= 392 or mins < -2:
+            if d.weekday() < 5 and mins >= 392 and closed != d.date():     # السوق سكر: نحفظ شموع اليوم للتسجيل الليلي
+                closed = d.date(); TV_QUOTA = False; save(st, 'لحظي: إغلاق السوق', data=True); log('السوق سكر')
+            time.sleep(60); continue
         try:
             bar = int(now) // 900
             if 0 <= mins <= m.LATE_MIN + 1 and bar != last_bar and now % 900 >= 25:   # 25 ثانية بعد إغلاق الشمعة
