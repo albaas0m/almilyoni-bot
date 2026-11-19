@@ -51,21 +51,15 @@ def _iso(t): return datetime.fromtimestamp(t, timezone.utc).strftime('%Y-%m-%dT%
 
 
 def minute_bars(sym, day):
-    """شموع دقيقة بس حول الدخول والخروج (نافذتين صغار) عشان نوفر — مو اليوم كامل."""
-    tr = CUR['tr']; out = []; miss = False
-    wins = ((tr['t_entry'], tr['t_entry'] + 600), (tr['t_exit'], tr['t_exit'] + 1500))
-    for a, b in (wins if ':' in sym else wins[1:]):   # السهم: نافذة الخروج بس
-        name = f"{sym}-1m-{a}.json"; p = CACHE / name
-        if miss: raise Missing(sym)
-        if ':' in sym and a == wins[1][0]:       # العقد: نافذة الخروج بس إذا الدخول فيه تداول وسعره من 100 إلى 1000$
-            ok = [x for x in out if x['v'] > 0]
-            if not ok or not (m.PREM_MIN <= ok[0]['c'] * 100 <= m.BUDGET - m.COMM): return out
-        if not p.exists():
-            NEED.append(dict(file=name, tool='get_ohlcv', symbol=sym if ':' in sym else f"{EXCH[sym]}:{sym}",
-                             interval='1m', date_from=_iso(a), date_to=_iso(b), format='columns', count=60)); miss = True; continue
-        out += bars_of(json.loads(p.read_text()), 60)
-    if miss: raise Missing(sym)
-    return sorted({b['t']: b for b in out}.values(), key=lambda b: b['t'])
+    """توفير طلبات TradingView (19 نوفمبر): السهم = نافذة الخروج بس (طلب واحد).
+    العقد = طلب واحد من الدخول لين الإغلاق (بدل نافذة دخول + نافذة خروج + طلب واسع)."""
+    if ':' in sym: return wide_bars(sym, day)
+    tr = CUR['tr']; a = tr['t_exit']; b = a + 1500
+    name = f"{sym}-1m-{a}.json"; p = CACHE / name
+    if not p.exists():
+        NEED.append(dict(file=name, tool='get_ohlcv', symbol=f"{EXCH[sym]}:{sym}", interval='1m',
+                         date_from=_iso(a), date_to=_iso(b), format='columns', count=60)); raise Missing(sym)
+    return bars_of(json.loads(p.read_text()), 60)
 
 
 CUR = {}
@@ -80,7 +74,7 @@ def expiry_list(min_expiry):  # تواريخ أبيان مرتبة من الأق
 
 def wide_bars(sym, day):
     """العقد ما تداول بالضبط وقت الخروج: نجيب شموعه من الدخول لين الإغلاق ونختار أقرب صفقة حقيقية."""
-    tr = CUR['tr']; occ = tv_symbol(sym) if len(sym) > 12 else sym
+    tr = CUR['tr']; occ = sym if ':' in sym else tv_symbol(sym) if len(sym) > 12 else sym
     a = tr['t_entry']; d = datetime.fromtimestamp(a, NY); b = int(d.replace(hour=16, minute=0, second=0).timestamp())
     name = f"{occ}-1m-wide-{a}.json"; p = CACHE / name
     if not p.exists():
@@ -90,16 +84,26 @@ def wide_bars(sym, day):
 
 
 def vix_change(day, t_entry):
+    """VIX للمقارنة بس، فما نطلبه (توفير طلب). إذا ملفه موجود نستخدمه."""
+    if not (CACHE / 'VIX-15m.json').exists(): return None
     vx = bars_of(load('VIX-15m.json'), 900)
     prev = [b for b in vx if datetime.fromtimestamp(b['t'], NY).date() < day]
     cur = [b for b in vx if b['t'] <= t_entry and datetime.fromtimestamp(b['t'], NY).date() == day]
     return round(100 * (cur[-1]['c'] / prev[-1]['c'] - 1), 2) if prev and cur else None
 
 
-def merge_15m():
-    miss = [s for s in m.SYMBOLS if not (CACHE / f"{s}-15m.json").exists()]
-    for s in miss:
-        NEED.append(dict(file=f"{s}-15m.json", tool='get_ohlcv', symbol=f"{EXCH[s]}:{s}", interval='15m', count=30, format='columns'))
+def fresh_15m(s, day):
+    """ملف 15د المحفوظ يغطي اليوم المطلوب؟ (عشان الأيام الناقصة تتسجل من نفس الملف بدون طلب جديد)"""
+    p = CACHE / f"{s}-15m.json"
+    if not p.exists(): return False
+    bs = bars_of(json.loads(p.read_text()), 900)
+    return bool(bs) and datetime.fromtimestamp(bs[-1]['t'], NY).date() >= day
+
+
+def merge_15m(day):
+    miss = [s for s in m.SYMBOLS if not fresh_15m(s, day)]
+    for s in miss:   # 130 شمعة ≈ 5 أيام تداول: يكفي لو فيه أيام ناقصة
+        NEED.append(dict(file=f"{s}-15m.json", tool='get_ohlcv', symbol=f"{EXCH[s]}:{s}", interval='15m', count=130, format='columns'))
     if miss: raise Missing(miss)
     for s in m.SYMBOLS:
         new = bars_of(load(f"{s}-15m.json"), 900)
@@ -112,12 +116,12 @@ def merge_15m():
 
 
 def run(day, merge=True):
-    if merge: merge_15m()
+    if merge: merge_15m(day)
     data = f.load_data(); trades = f.plan_for(data, day); quotes = []
     for tr in trades:
         CUR.update(sym=tr['symbol'], day=day, tr=tr)
         SPEC[f"{tr['symbol']}-expiries.json"] = dict(file=f"{tr['symbol']}-expiries.json", tool='abyan browse_options_chain', symbol=tr['symbol'])
-        SPEC['VIX-15m.json'] = dict(file='VIX-15m.json', tool='get_ohlcv', symbol='CBOE:VIX', interval='15m', count=60, format='columns')
+        f.VOL_MINUTES = f.WIDE_MINUTES(tr)          # حجم العقد محسوب من الدخول لين الإغلاق
         try:
             q = f.price_trade(tr, day, minute_bars(tr['symbol'], day), vix_change(day, tr['t_entry']))
         except Missing:
@@ -131,7 +135,6 @@ def run(day, merge=True):
 
 
 f.minute_bars = minute_bars; f.expiry_list = expiry_list; f.wide_bars = wide_bars; f.vix_change = vix_change
-f.VOL_MINUTES = 35                      # نافذتين: 10 دقائق عند الدخول + 25 عند الخروج
 f.WIDE_MINUTES = lambda tr: (int(datetime.fromtimestamp(tr['t_entry'], NY).replace(hour=16, minute=0, second=0).timestamp()) - tr['t_entry']) // 60
 f.occ = lambda sym, exp, side, K: f"{sym}{exp:%y%m%d}{side}{int(round(K * 1000)):08d}"
 def _opt_bars(sym, day):     # العقود: الملف باسم OPRA

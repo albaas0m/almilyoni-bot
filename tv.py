@@ -137,7 +137,8 @@ def bars(sym, interval='15m', count=60):
     global OHLCV
     s = sym if ':' in sym else f"{EXCH[sym]}:{sym}"
     try: r = call(OHLCV, dict(symbol=s, interval=interval, count=count, format='columns'))
-    except RuntimeError:
+    except RuntimeError as e:
+        if 'QUOTA' in str(e).upper(): raise          # خلص حد TradingView اليومي: لا نعيد ونهدر طلبات
         OHLCV = next(t for t in tools() if t.endswith('get-ohlcv') or t.endswith('get_ohlcv'))
         r = call(OHLCV, dict(symbol=s, interval=interval, count=count, format='columns'))
     c = r['bars']
