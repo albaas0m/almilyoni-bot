@@ -100,7 +100,16 @@ def fresh_15m(s, day):
     return bool(bs) and datetime.fromtimestamp(bs[-1]['t'], NY).date() >= day
 
 
+def data_has_day(s, day):
+    """البوت اللحظي حفظ شموع اليوم كاملة في data/ (لين شمعة 3:45)؟ إذا إيه ما نطلبها مرة ثانية."""
+    p = f.DATA / f'{s}-15m.json'
+    if not p.exists(): return False
+    last = int(datetime(day.year, day.month, day.day, 15, 45, tzinfo=NY).timestamp())
+    return any(b['t'] == last for b in json.loads(p.read_text())['bars'][-40:])
+
+
 def merge_15m(day):
+    if all(data_has_day(s, day) for s in m.SYMBOLS): return
     miss = [s for s in m.SYMBOLS if not fresh_15m(s, day)]
     for s in miss:   # 130 شمعة ≈ 5 أيام تداول: يكفي لو فيه أيام ناقصة
         NEED.append(dict(file=f"{s}-15m.json", tool='get_ohlcv', symbol=f"{EXCH[s]}:{s}", interval='15m', count=130, format='columns'))
@@ -118,7 +127,11 @@ def merge_15m(day):
 def run(day, merge=True):
     if merge: merge_15m(day)
     data = f.load_data(); trades = f.plan_for(data, day); quotes = []
+    lp = ROOT / 'live.json'                  # الصفقات اللي البوت اللحظي سجل سعرها من أبيان ما نصرف عليها طلبات
+    live = {(x['symbol'], x['t_entry']) for x in (json.loads(lp.read_text())['trades'] if lp.exists() else [])
+            if x.get('opt_entry') and x.get('opt_exit') is not None}
     for tr in trades:
+        if (tr['symbol'], tr['t_entry']) in live: continue
         CUR.update(sym=tr['symbol'], day=day, tr=tr)
         SPEC[f"{tr['symbol']}-expiries.json"] = dict(file=f"{tr['symbol']}-expiries.json", tool='abyan browse_options_chain', symbol=tr['symbol'])
         f.VOL_MINUTES = f.WIDE_MINUTES(tr)          # حجم العقد محسوب من الدخول لين الإغلاق

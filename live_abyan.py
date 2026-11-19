@@ -28,10 +28,10 @@ def load():
     return json.loads(LIVE.read_text()) if LIVE.exists() else {'trades': []}
 
 
-def save(st, msg):
+def save(st, msg, data=False):
     LIVE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
     try:   # نحفظ في الريبو على طول (عشان لو الجوب انقطع ما يضيع شي)
-        subprocess.run('git add live.json abyan_token.enc tv_token.enc && git commit -qm "' + msg + '" && '
+        subprocess.run('git add live.json abyan_token.enc tv_token.enc' + (' data' if data else '') + ' && git commit -qm "' + msg + '" && '
                        'git pull -q --rebase origin main && git push -q', shell=True, cwd=ROOT, timeout=90)
     except Exception as e: log('git:', e)
 
@@ -85,9 +85,14 @@ def update_tv(now):
         p.write_text(json.dumps(old, separators=(',', ':')))
 
 
+TV_QUOTA = False
 def new_signals(now):
-    try: update_tv(now)                               # المصدر الأساسي: حسابك في TradingView
+    global TV_QUOTA
+    try:
+        if TV_QUOTA: raise RuntimeError('حد TradingView اليومي خالص')
+        update_tv(now)                                # المصدر الأساسي: حسابك في TradingView
     except Exception as e:
+        if 'QUOTA' in str(e).upper(): TV_QUOTA = True   # لا نعيد الطلب لين بكرة (كل طلب زيادة يمدد الإيقاف)
         log('TradingView ما رد، أستخدم ياهو هالمرة:', e); f.update_data()
     data = f.load_data()
     t_next = (int(now) // 900) * 900                  # الشمعة اللي بدت الحين = شمعة الدخول
@@ -144,7 +149,9 @@ def main():
     while True:
         now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570
         if d.weekday() >= 5 or mins >= 392 or time.time() - T0 > JOB_SEC:
-            log('خلص الوقت'); save(st, 'لحظي: نهاية الجوب'); break
+            if d.weekday() < 5 and mins < 392:          # حد الجوب (6 ساعات) والسوق لسا ما سكر: نشغّل جوب ثاني يكمل
+                (ROOT / '.again').write_text('1'); log('حد الجوب: جوب ثاني بيكمل')
+            log('خلص الوقت'); save(st, 'لحظي: نهاية الجوب', data=mins >= 392); break
         if mins < -2: time.sleep(60); continue
         try:
             bar = int(now) // 900
