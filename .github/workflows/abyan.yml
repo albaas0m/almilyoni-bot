@@ -8,6 +8,7 @@ on:
       args: {description: 'لـ price: مثال AMD 2026-11-27 put 495', required: false, default: 'AMD 2026-11-27 put 495'}
 permissions:
   contents: write
+  actions: write
 concurrency: almilyoni
 jobs:
   abyan:
@@ -33,3 +34,8 @@ jobs:
           for f in abyan_client.json abyan_token.enc; do [ -f $f ] && git add $f; done; true
           git diff --cached --quiet || git commit -m "أبيان: ربط/تجديد التوكن (مشفّر)"
           git push
+      - name: تشغيل البوت بعد الدخول
+        if: success() && github.event.inputs.action == 'finish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run live.yml --ref main -R "$GITHUB_REPOSITORY" && echo "شغّلت البوت"

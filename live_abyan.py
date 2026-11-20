@@ -158,7 +158,7 @@ def main():
         t0 = time.time(); S = stock_px(a.test[0]); c = pick_contract(a.test[0], a.test[1], S, time.time())
         log(a.test, 'السهم', S, '← العقد', c and (c[0].isoformat(), c[1], f'{c[2] * 100:.0f}$'), f'({time.time() - t0:.1f} ثانية)')
         save(load(), 'لحظي: اختبار'); return
-    st = load(); last_bar = None; closed = None; last_rec = 0.0
+    st = load(); last_bar = None; closed = None; last_rec = 0.0; last_keep = 0.0
     while True:
         now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570
         if time.time() - T0 > JOB_SEC:
@@ -173,6 +173,10 @@ def main():
                 if d.weekday() < 5 and mins < -2: lim = min(lim, now + (-mins - 5) * 60)     # قبل الافتتاح: نخلص قبله بـ5 دقايق
                 record_auto.run_missing(deadline=lim); st = load()
             except Exception: log('التسجيل الآلي:', traceback.format_exc()[-400:])
+        if now - last_keep > 20 * 3600:  # (20 نوفمبر، بعد مراجعة Gemini) تجديد دخول TradingView وأبيان مرة كل 20 ساعة بس، عشان ما يموت التوكن في الويكند بدون تدوير زايد
+            last_keep = now
+            try: tv.access_token(); abyan.access_token(); save(st, 'لحظي: تجديد الدخول')
+            except BaseException as e: log('⚠️ تجديد الدخول فشل:', e)
         if d.weekday() >= 5 or mins >= 392 or mins < -2:
             if d.weekday() < 5 and mins >= 392 and closed != d.date():     # السوق سكر: نحفظ شموع اليوم للتسجيل الليلي
                 closed = d.date(); save(st, 'لحظي: إغلاق السوق', data=True); log('السوق سكر')
@@ -191,4 +195,16 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except SystemExit as e:
+        # (20 نوفمبر، بعد مراجعة Gemini) فشل الدخول كان يقتل الجوب بصمت ويوقف السلسلة.
+        # invalid_grant = الدخول مات فعلاً: نوقف بخطأ (يوصلك إيميل فشل من GitHub) وما نعيد، وبعد ما تسجل دخول (finish) البوت يرجع يشتغل لحاله.
+        # غيره (عطل مؤقت في السيرفر/الشبكة): ننتظر 5 دقايق ونخلي الجوب اللي بعده يكمل.
+        msg = str(e.code or '')
+        if e.code not in (None, 0):
+            if 'invalid_grant' in msg or 'أعد الدخول' in msg and '(400)' in msg:
+                log('❌ الدخول انتهى:', msg, '— سجّل دخول من جديد (start ثم finish) والبوت يرجع لحاله')
+            else:
+                log('⚠️ عطل مؤقت:', msg, '— أعيد بعد 5 دقايق'); time.sleep(300); (ROOT / '.again').write_text('1')
+        raise
