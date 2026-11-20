@@ -30,9 +30,12 @@ def load():
 
 def save(st, msg, data=False):
     LIVE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
+    # (20 نوفمبر) كان git pull --rebase يفشل بسبب تعديلات data/ غير المحفوظة فما ينرفع شي أبداً: --autostash + إعادة محاولة + نسجل الفشل
+    cmd = ('git add live.json abyan_token.enc tv_token.enc' + (' data' if data else '') + ' && (git diff --cached --quiet || git commit -qm "' + msg + '") && '
+           'for i in 1 2 3; do git pull -q --rebase --autostash origin main && git push -q && exit 0; sleep 5; done; exit 1')
     try:   # نحفظ في الريبو على طول (عشان لو الجوب انقطع ما يضيع شي)
-        subprocess.run('git add live.json abyan_token.enc tv_token.enc' + (' data' if data else '') + ' && git commit -qm "' + msg + '" && '
-                       'git pull -q --rebase origin main && git push -q', shell=True, cwd=ROOT, timeout=90)
+        r = subprocess.run(cmd, shell=True, cwd=ROOT, timeout=180, capture_output=True, text=True, executable='/bin/bash')
+        if r.returncode: log('⚠️ فشل رفع الحفظ للريبو:', (r.stdout + r.stderr)[-300:])
     except Exception as e: log('git:', e)
 
 
@@ -74,10 +77,11 @@ def pick_contract(sym, side, S, now):
 
 
 # ───────── الإشارات ─────────
-def update_tv(now):
+def update_tv(now, usage=None):
     """شموع 15د من حساب أحمد في TradingView (المكتملة بس)، تندمج مع ملفات data/."""
     for s in m.SYMBOLS:
-        new = [b for b in tv.bars(s, '15m', 60) if b['t'] + 900 <= now]
+        if usage is not None: usage['n'] = usage.get('n', 0) + 1     # نحسبه قبل الطلب: الفاشل يتحسب بعد
+        new = [b for b in tv.bars(s, '15m', 130) if b['t'] + 900 <= now]
         p = f.DATA / f'{s}-15m.json'; old = json.loads(p.read_text())
         first = new[0]['t'] if new else 1e12
         old['bars'] = [b for b in old['bars'] if b['t'] < first] + new
@@ -85,16 +89,25 @@ def update_tv(now):
         p.write_text(json.dumps(old, separators=(',', ':')))
 
 
-TV_QUOTA = False
-def new_signals(now):
-    global TV_QUOTA
+TV_BLOCK_UNTIL = 0.0      # كولداون حد TradingView (10 دقايق) — نوقف الطلبات ونعيد بعده
+TV_FAILS = 0              # فشل حد متتالي: بعد 3 نعتبره الحد اليومي ونوقف ساعة بدل ما نكرر الطلب كل 11 دقيقة
+TV_DAILY_BUDGET = 150     # حد البوت اللحظي لليوم (حد الحساب 500 يشاركه التسجيل الليلي، وكل طلب فاشل يتحسب)
+def new_signals(now, st):
+    global TV_BLOCK_UNTIL, TV_FAILS
+    u = st.setdefault('tv_calls', {}); day = datetime.fromtimestamp(now, NY).date().isoformat()
+    if u.get('day') != day: u.clear(); u.update(day=day, n=0)
     try:
-        if TV_QUOTA: raise RuntimeError('حد TradingView اليومي خالص')
-        update_tv(now)                                # المصدر الأساسي: حسابك في TradingView
+        if now < TV_BLOCK_UNTIL: raise tv.QuotaError(f'كولداون TradingView لين {datetime.fromtimestamp(TV_BLOCK_UNTIL, NY):%H:%M}')
+        if u['n'] + len(m.SYMBOLS) > TV_DAILY_BUDGET: raise tv.QuotaError(f"وصلت ميزانية البوت اللحظي ({u['n']} طلب اليوم)")
+        update_tv(now, u); TV_FAILS = 0               # المصدر الأساسي: حسابك في TradingView (طلب واحد لكل سهم في الشمعة)
     except Exception as e:
-        if 'QUOTA' in str(e).upper(): TV_QUOTA = True   # لا نعيد الطلب لين بكرة (كل طلب زيادة يمدد الإيقاف)
+        if isinstance(e, tv.QuotaError) and now >= TV_BLOCK_UNTIL:    # نكمل باللي عندنا ونعيد بعد الكولداون
+            TV_FAILS += 1; TV_BLOCK_UNTIL = now + (60 if TV_FAILS >= 3 else 11) * 60
         log('TradingView ما رد، أستخدم ياهو هالمرة:', e); f.update_data()
     data = f.load_data()
+    for s in m.SYMBOLS:
+        lt = data[s][-1]['t'] if data.get(s) else 0
+        if now - lt > 1500 + 900: log(f'⚠️ شموع {s} قديمة: آخر شمعة {datetime.fromtimestamp(lt, NY):%m-%d %H:%M} — ما فيه إشارة لهالسهم الجولة هذي')
     t_next = (int(now) // 900) * 900                  # الشمعة اللي بدت الحين = شمعة الدخول
     for s in m.SYMBOLS:                               # شمعة دخول مؤقتة بسعر أبيان الحين (الاستراتيجية تدخل افتتاح الشمعة التالية)
         bs = data.get(s)
@@ -145,23 +158,30 @@ def main():
         t0 = time.time(); S = stock_px(a.test[0]); c = pick_contract(a.test[0], a.test[1], S, time.time())
         log(a.test, 'السهم', S, '← العقد', c and (c[0].isoformat(), c[1], f'{c[2] * 100:.0f}$'), f'({time.time() - t0:.1f} ثانية)')
         save(load(), 'لحظي: اختبار'); return
-    global TV_QUOTA
-    st = load(); last_bar = None; closed = None
+    st = load(); last_bar = None; closed = None; last_rec = 0.0
     while True:
         now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570
         if time.time() - T0 > JOB_SEC:
             # (19 نوفمبر) مواعيد GitHub تتأخر ساعات، فالبوت ما يعتمد عليها: كل جوب يشغّل اللي بعده على طول،
             # فيكون فيه دايم جوب ينتظر الافتتاح أو يراقب السوق
             (ROOT / '.again').write_text('1'); log('حد الجوب: جوب ثاني بيكمل'); save(st, 'لحظي: نهاية الجوب'); break
+        if (d.weekday() >= 5 or mins >= 392 or mins < -2) and now - last_rec > 1800:   # السوق مقفل: نسجل الأيام الناقصة (بدون Claude)
+            last_rec = now
+            try:
+                import record_auto
+                lim = T0 + JOB_SEC - 600
+                if d.weekday() < 5 and mins < -2: lim = min(lim, now + (-mins - 5) * 60)     # قبل الافتتاح: نخلص قبله بـ5 دقايق
+                record_auto.run_missing(deadline=lim); st = load()
+            except Exception: log('التسجيل الآلي:', traceback.format_exc()[-400:])
         if d.weekday() >= 5 or mins >= 392 or mins < -2:
             if d.weekday() < 5 and mins >= 392 and closed != d.date():     # السوق سكر: نحفظ شموع اليوم للتسجيل الليلي
-                closed = d.date(); TV_QUOTA = False; save(st, 'لحظي: إغلاق السوق', data=True); log('السوق سكر')
+                closed = d.date(); save(st, 'لحظي: إغلاق السوق', data=True); log('السوق سكر')
             time.sleep(60); continue
         try:
             bar = int(now) // 900
             if 0 <= mins <= m.LATE_MIN + 1 and bar != last_bar and now % 900 >= 25:   # 25 ثانية بعد إغلاق الشمعة
                 last_bar = bar
-                for t in new_signals(now): enter(st, t, now)
+                for t in new_signals(now, st): enter(st, t, now)
             check_exits(st, now, close_all=mins >= 389)                                # 15:59 يقفل الكل
         except Exception:
             log(traceback.format_exc()[-600:])
