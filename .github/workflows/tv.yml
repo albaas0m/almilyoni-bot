@@ -8,6 +8,7 @@ on:
       args: {description: 'لـ bars: مثال AMD', required: false, default: 'AMD'}
 permissions:
   contents: write
+  actions: write
 concurrency: almilyoni
 jobs:
   tv:
@@ -33,3 +34,8 @@ jobs:
           for f in tv_client.json tv_token.enc; do [ -f $f ] && git add $f; done; true
           git diff --cached --quiet || git commit -m "TradingView: ربط/تجديد التوكن (مشفّر)"
           git push
+      - name: تشغيل البوت بعد الدخول
+        if: success() && github.event.inputs.action == 'finish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run live.yml --ref main -R "$GITHUB_REPOSITORY" && echo "شغّلت البوت"
