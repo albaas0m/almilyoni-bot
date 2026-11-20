@@ -6,7 +6,8 @@ Usage:
     python ask_gemini.py "question" file1.py file2  # attach files as context
     echo "long text" | python ask_gemini.py -        # question from stdin
 
-Needs env var GEMINI_API_KEY (free key from https://aistudio.google.com).
+Key: either a Claude Code "Network secret" for generativelanguage.googleapis.com
+(header x-goog-api-key, injected by the proxy) or env var GEMINI_API_KEY.
 Optional GEMINI_MODEL to force a model; otherwise the best available "pro"
 model is picked automatically. Standard library only.
 """
@@ -28,8 +29,16 @@ SYSTEM = (
 )
 
 
-def _get(url):
-    with urllib.request.urlopen(url, timeout=60) as r:
+def _headers(key):
+    h = {"Content-Type": "application/json"}
+    if key:
+        h["x-goog-api-key"] = key
+    return h
+
+
+def _get(url, key):
+    req = urllib.request.Request(url, headers=_headers(key))
+    with urllib.request.urlopen(req, timeout=60) as r:
         return json.load(r)
 
 
@@ -43,7 +52,7 @@ def pick_model(key):
     if forced:
         return forced
     try:
-        models = _get(f"{API}/models?key={key}&pageSize=200").get("models", [])
+        models = _get(f"{API}/models?pageSize=200", key).get("models", [])
     except Exception:
         return "gemini-2.5-pro"
     usable = [
@@ -61,9 +70,7 @@ def pick_model(key):
 
 
 def main():
-    key = os.environ.get("GEMINI_API_KEY")
-    if not key:
-        sys.exit("GEMINI_API_KEY is not set")
+    key = os.environ.get("GEMINI_API_KEY", "")
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     question = sys.stdin.read() if sys.argv[1] == "-" else sys.argv[1]
@@ -80,9 +87,9 @@ def main():
         "contents": [{"role": "user", "parts": [{"text": "\n".join(parts)}]}],
     }
     req = urllib.request.Request(
-        f"{API}/models/{model}:generateContent?key={key}",
+        f"{API}/models/{model}:generateContent",
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers=_headers(key),
     )
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
