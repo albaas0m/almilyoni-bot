@@ -47,26 +47,13 @@ def _version_key(name):
     return nums[0] if nums else 0.0
 
 
-def pick_model(key):
+def candidates(key):
+    """Models to try in order; a 404 (retired model) moves to the next one."""
     forced = os.environ.get("GEMINI_MODEL")
     if forced:
-        return forced
-    try:
-        models = _get(f"{API}/models?pageSize=200", key).get("models", [])
-    except Exception:
-        return "gemini-2.5-pro"
-    usable = [
-        m["name"].split("/", 1)[1]
-        for m in models
-        if "generateContent" in m.get("supportedGenerationMethods", [])
-        and m["name"].startswith("models/gemini-")
-        and not re.search(r"(exp|preview|tts|image|lite|embedding|live|audio)", m["name"])
-    ]
-    for tier in ("pro", "flash"):
-        cands = [n for n in usable if tier in n]
-        if cands:
-            return max(cands, key=_version_key)
-    return usable[0] if usable else "gemini-2.5-pro"
+        return [forced]
+    return ["gemini-4-neon", "gemini-pro-latest", "gemini-3.1-pro-preview", "gemini-2.5-pro",
+            "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash"]
 
 
 def main():
@@ -81,24 +68,30 @@ def main():
                 parts.append(f"\n--- FILE: {path} ---\n{f.read()[:200_000]}")
         except OSError as e:
             parts.append(f"\n--- FILE: {path} (could not read: {e}) ---")
-    model = pick_model(key)
     body = {
         "systemInstruction": {"parts": [{"text": SYSTEM}]},
         "contents": [{"role": "user", "parts": [{"text": "\n".join(parts)}]}],
     }
-    req = urllib.request.Request(
-        f"{API}/models/{model}:generateContent",
-        data=json.dumps(body).encode(),
-        headers=_headers(key),
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=300) as r:
-            data = json.load(r)
-    except urllib.error.HTTPError as e:
-        sys.exit(f"Gemini error {e.code} ({model}): {e.read().decode()[:500]}")
-    cand = (data.get("candidates") or [{}])[0]
-    text = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", []))
-    print(f"[Gemini model: {model}]\n{text or json.dumps(data)[:1000]}")
+    err = ""
+    for model in candidates(key):
+        req = urllib.request.Request(
+            f"{API}/models/{model}:generateContent",
+            data=json.dumps(body).encode(),
+            headers=_headers(key),
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300) as r:
+                data = json.load(r)
+        except urllib.error.HTTPError as e:
+            err = f"Gemini error {e.code} ({model}): {e.read().decode()[:500]}"
+            if e.code in (404, 429, 503):
+                continue
+            sys.exit(err)
+        cand = (data.get("candidates") or [{}])[0]
+        text = "".join(p.get("text", "") for p in cand.get("content", {}).get("parts", []))
+        print(f"[Gemini model: {model}]\n{text or json.dumps(data)[:1000]}")
+        return
+    sys.exit(err)
 
 
 if __name__ == "__main__":

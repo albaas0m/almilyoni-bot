@@ -98,6 +98,13 @@ def _parse(b):
     raise ValueError(b[:300])
 
 
+class QuotaError(RuntimeError):
+    """حد TradingView اليومي/الدقيقة (TOOL_QUOTA_EXCEEDED) — فيه كولداون ~10 دقايق."""
+
+
+def _is_quota(txt): return any(w in txt.upper() for w in ('QUOTA', 'COOLDOWN', 'USAGE LIMIT', 'RATE LIMIT', 'TOO MANY'))
+
+
 def call(tool, args):
     at = access_token()
     for url in MCP_URLS:
@@ -109,10 +116,17 @@ def call(tool, args):
         if sid: h['Mcp-Session-Id'] = sid
         _post(url, dict(jsonrpc='2.0', method='notifications/initialized'), form=False, headers=h)
         st, _, b = _post(url, dict(jsonrpc='2.0', id=2, method='tools/call', params=dict(name=tool, arguments=args)), form=False, headers=h)
-        r = _parse(b)
-        if 'error' in r: raise RuntimeError(r['error'])
+        if st == 429: raise QuotaError(f'HTTP 429: {b[:200]}')
+        try: r = _parse(b)
+        except ValueError as e:
+            raise (QuotaError if _is_quota(b) else RuntimeError)(f'رد غير مفهوم من TradingView (HTTP {st}): {b[:300]}')
+        if 'error' in r:
+            raise (QuotaError if _is_quota(str(r['error'])) else RuntimeError)(r['error'])
         txt = ''.join(c.get('text', '') for c in r['result'].get('content', []))
-        return r['result'].get('structuredContent') or json.loads(txt)
+        if r['result'].get('structuredContent'): return r['result']['structuredContent']
+        try: return json.loads(txt)
+        except ValueError:     # نص خطأ مو JSON (مثل رسالة الحد اليومي): نعرض نصه الحقيقي بدل "Expecting value"
+            raise (QuotaError if _is_quota(txt) else RuntimeError)(f'TradingView رجّع نص مو بيانات: {txt[:300]}')
     raise RuntimeError(f'ما قدرت أتصل بـ TradingView: {last}')
 
 
@@ -137,8 +151,8 @@ def bars(sym, interval='15m', count=60):
     global OHLCV
     s = sym if ':' in sym else f"{EXCH[sym]}:{sym}"
     try: r = call(OHLCV, dict(symbol=s, interval=interval, count=count, format='columns'))
+    except QuotaError: raise                         # خلص الحد: لا نعيد ونهدر طلبات
     except RuntimeError as e:
-        if 'QUOTA' in str(e).upper(): raise          # خلص حد TradingView اليومي: لا نعيد ونهدر طلبات
         OHLCV = next(t for t in tools() if t.endswith('get-ohlcv') or t.endswith('get_ohlcv'))
         r = call(OHLCV, dict(symbol=s, interval=interval, count=count, format='columns'))
     c = r['bars']
