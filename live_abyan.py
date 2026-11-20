@@ -21,6 +21,18 @@ MAX_STRIKES, JOB_SEC = 15, 5 * 3600 + 50 * 60
 T0 = time.time()
 
 
+# (20 نوفمبر، بعد مراجعة Gemini) عطل بورصة نيويورك وأيام الإغلاق المبكر (1:00 الظهر نيويورك)
+NYSE_CLOSED = {'2026-11-26', '2026-12-25', '2027-01-01', '2027-01-18', '2027-02-15', '2027-03-26', '2027-05-31',
+               '2027-06-18', '2027-07-05', '2027-09-06', '2027-11-25', '2027-12-24'}
+NYSE_EARLY = {'2026-11-27', '2026-12-24', '2027-11-26'}
+
+
+def closed_day(d): return d.weekday() >= 5 or d.date().isoformat() in NYSE_CLOSED
+
+
+def close_min(d): return 210 if d.date().isoformat() in NYSE_EARLY else 390   # دقايق من 9:30 لين الإغلاق
+
+
 def log(*a): print(datetime.now(NY).strftime('%H:%M:%S'), *a, flush=True)
 
 
@@ -160,33 +172,38 @@ def main():
         save(load(), 'لحظي: اختبار'); return
     st = load(); last_bar = None; closed = None; last_rec = 0.0; last_keep = 0.0
     while True:
-        now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570
+        now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570; cm = close_min(d)
         if time.time() - T0 > JOB_SEC:
             # (19 نوفمبر) مواعيد GitHub تتأخر ساعات، فالبوت ما يعتمد عليها: كل جوب يشغّل اللي بعده على طول،
             # فيكون فيه دايم جوب ينتظر الافتتاح أو يراقب السوق
             (ROOT / '.again').write_text('1'); log('حد الجوب: جوب ثاني بيكمل'); save(st, 'لحظي: نهاية الجوب'); break
-        if (d.weekday() >= 5 or mins >= 392 or mins < -2) and now - last_rec > 1800:   # السوق مقفل: نسجل الأيام الناقصة (بدون Claude)
-            last_rec = now
-            try:
-                import record_auto
-                lim = T0 + JOB_SEC - 600
-                if d.weekday() < 5 and mins < -2: lim = min(lim, now + (-mins - 5) * 60)     # قبل الافتتاح: نخلص قبله بـ5 دقايق
-                record_auto.run_missing(deadline=lim); st = load()
-            except Exception: log('التسجيل الآلي:', traceback.format_exc()[-400:])
-        if now - last_keep > 20 * 3600:  # (20 نوفمبر، بعد مراجعة Gemini) تجديد دخول TradingView وأبيان مرة كل 20 ساعة بس، عشان ما يموت التوكن في الويكند بدون تدوير زايد
+        if now - last_keep > 20 * 3600:  # (20 نوفمبر، بعد مراجعة Gemini) تجديد دخول TradingView وأبيان مرة كل 20 ساعة بس
             last_keep = now
             try: tv.access_token(); abyan.access_token(); save(st, 'لحظي: تجديد الدخول')
             except BaseException as e: log('⚠️ تجديد الدخول فشل:', e)
-        if d.weekday() >= 5 or mins >= 392 or mins < -2:
-            if d.weekday() < 5 and mins >= 392 and closed != d.date():     # السوق سكر: نحفظ شموع اليوم للتسجيل الليلي
+        if closed_day(d) or mins >= cm + 2 or mins < -2:
+            done_today = closed_day(d) or mins >= cm + 2          # بعد الإغلاق أو ويكند أو عطلة
+            if not closed_day(d) and mins >= cm + 2 and closed != d.date():     # السوق سكر: نحفظ شموع اليوم للتسجيل
                 closed = d.date(); save(st, 'لحظي: إغلاق السوق', data=True); log('السوق سكر')
+            if done_today or now - last_rec > 1800:                # نسجل الأيام الناقصة (بدون Claude)
+                last_rec = now
+                try:
+                    import record_auto
+                    lim = T0 + JOB_SEC - 600
+                    if not closed_day(d) and mins < -2: lim = min(lim, now + (-mins - 5) * 60)     # قبل الافتتاح: نخلص قبله بـ5 دقايق
+                    record_auto.run_missing(deadline=lim); st = load()
+                except Exception: log('التسجيل الآلي:', traceback.format_exc()[-400:])
+            if done_today:
+                # (20 نوفمبر، طلب أحمد) البوت يشتغل بس وقت السوق: مهمة مجدولة تشغّله 8:58 نيويورك (قبل الافتتاح بنص ساعة)،
+                # وبعد الإغلاق والتسجيل يقفل بدون ما يشغّل جوب ثاني — ما يصير شغال 24 ساعة على GitHub
+                save(st, 'لحظي: نهاية اليوم'); log('خلص اليوم، البوت يقفل لين بكرة'); break
             time.sleep(60); continue
         try:
             bar = int(now) // 900
             if 0 <= mins <= m.LATE_MIN + 1 and bar != last_bar and now % 900 >= 25:   # 25 ثانية بعد إغلاق الشمعة
                 last_bar = bar
                 for t in new_signals(now, st): enter(st, t, now)
-            check_exits(st, now, close_all=mins >= 389)                                # 15:59 يقفل الكل
+            check_exits(st, now, close_all=mins >= cm - 1)                             # دقيقة قبل الإغلاق يقفل الكل
         except Exception:
             log(traceback.format_exc()[-600:])
         if a.once: break

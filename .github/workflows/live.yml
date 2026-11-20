@@ -4,14 +4,8 @@ name: almilyoni-live
 # كل جوب (حده 6 ساعات) يشغّل اللي بعده بنفسه، فدايم فيه جوب ينتظر الافتتاح أو يراقب السوق
 # (19 نوفمبر) جدول GitHub كان يتأخر ~8 ساعات (يشتغل بعد الإغلاق): صار فيه كذا موعد قبل الافتتاح بدقائق مو على رأس الساعة،
 # والجوب اللي يبدأ بدري ينتظر الافتتاح، واللي بعده ينتظر في الطابور ويطلع على طول إذا السوق سكر
+# (20 نوفمبر) التشغيل صار من مهمة Claude المجدولة كل يوم 8:58 نيويورك (مواعيد GitHub تتأخر ساعات)، والبوت يقفل نفسه بعد الإغلاق
 on:
-  schedule:
-    - cron: '17 11 * * 1-5'
-    - cron: '47 11 * * 1-5'
-    - cron: '17 12 * * 1-5'
-    - cron: '47 12 * * 1-5'
-    - cron: '17 13 * * 1-5'
-    - cron: '47 13 * * 1-5'
   workflow_dispatch:
     inputs:
       test: {description: 'اختبار: سهم واتجاه مثل AMD P (فاضي = تشغيل عادي)', required: false, default: ''}
@@ -41,4 +35,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -f .again ]; then gh workflow run live.yml --ref main -R "$GITHUB_REPOSITORY" && echo "شغّلت الجوب اللي بعده"; fi
+          if [ -f .again ]; then for i in 1 2 3; do gh workflow run live.yml --ref main -R "$GITHUB_REPOSITORY" && echo "شغّلت الجوب اللي بعده" && break; sleep 20; done; fi
