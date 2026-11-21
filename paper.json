@@ -1279,6 +1279,46 @@
    "time_value": 5.35,
    "skip": "",
    "drtip_skip": false
+  },
+  {
+   "id": "2026-11-17-TSLA-0",
+   "day": "2026-11-17",
+   "symbol": "TSLA",
+   "side": "P",
+   "t_entry": 1794930300,
+   "t_exit": 1794948300,
+   "entry": 377.75,
+   "target": 373.03,
+   "stop": 384.83,
+   "exit": 380.14,
+   "why": "نهاية الجلسة",
+   "stock_pct": -0.664,
+   "prev_buy_vol_pct": 38.7,
+   "ema50d": 376.54,
+   "adr": 15.839,
+   "before10": false,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": -106.0,
+   "vix_skip": null,
+   "strike": 365.0,
+   "expiry": "2026-11-30",
+   "premium": 975,
+   "exit_premium": 805,
+   "opt_usd": -172,
+   "opt_pct": -17.6,
+   "exit_price_source": "سعر العقد الحقيقي (أقرب تداول، يبعد 72 دقيقة عن الخروج)",
+   "over_budget": false,
+   "opt_usd_worst": -172,
+   "opt_exit_t": 1794944820,
+   "opt_symbol": "TSLA261130P00365000",
+   "opt_day_vol": 2,
+   "opt_vol_minutes": 315,
+   "bucket": "14",
+   "time_value": 9.75,
+   "skip": "سيولة ضعيفة",
+   "drtip_skip": false
   }
  ],
  "days": {
@@ -1353,6 +1393,10 @@
   "2026-11-16": {
    "n": 1,
    "updated": "2026-11-17 00:43"
+  },
+  "2026-11-17": {
+   "n": 1,
+   "updated": "2026-11-21 08:08"
   }
  }
 }
