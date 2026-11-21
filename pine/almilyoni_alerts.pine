@@ -1,7 +1,7 @@
 //@version=6
 // المليوني v3 — تنبيهات البوت (21 نوفمبر 2026)
 // نفس شروط almilyoni_weekly.trades_for بالضبط، والحساب على سيرفرات TradingView بدل ما البوت يطلب الشموع.
-// حطه على شارت 15 دقيقة (ساعات السوق العادية بس، بدون ما قبل/بعد السوق) لكل سهم: NVDA, TSLA, AAPL, AMD
+// حطه على شارت 15 دقيقة (ساعات السوق العادية بس، بدون ما قبل/بعد السوق) لكل سهم: NVDA, TSLA, AAPL, AMD, AVGO, LRCX, TSM, ARM (8 تنبيهات)
 // التنبيه: Condition = هذا المؤشر ← "Any alert() function call"، وWebhook URL = رابط ntfy اللي عطاك إياه Claude.
 //
 // CALL: UT Buy (ATR10، حساسية 1) + إغلاق فوق ZLSMA32 + فوق VWAP + SPY فوق VWAP حقه + السهم تحت EMA50 اليومي (عكس الترند)

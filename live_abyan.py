@@ -93,6 +93,7 @@ def pick_contract(sym, side, S, now):
 # والبوت يقراها كل دقيقة: صفر طلبات من حد TradingView وقت السوق. يشتغل إذا فيه سر NTFY_TOPIC وملف webhook_on.
 NTFY_TOPIC = os.environ.get('NTFY_TOPIC', ''); NTFY_KEY = os.environ.get('NTFY_KEY', '')
 WEBHOOK = bool(NTFY_TOPIC) and (ROOT / 'webhook_on').exists()
+if WEBHOOK: m.TRADE_SYMBOLS = list(m.ALL_TRADE_SYMBOLS)    # (21 نوفمبر، طلب أحمد) الـ8 أسهم كلها: التنبيهات ما تاكل من الحد
 
 
 def webhook_signals(now, st):

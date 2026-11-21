@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 # قرار 19 نوفمبر 2026: توب 4 بالسيولة والحركة (متوسط تداول يومي آخر 20 يوم: NVDA 8.6B، TSLA 6.2B، AAPL 4.6B، AMD 4.5B)
 # الباقي مؤجل: 'AVGO', 'LRCX', 'TSM', 'ARM' — يوفر طلبات TradingView (5 بدل 9 كل 15 دقيقة)
 TRADE_SYMBOLS = ['NVDA', 'TSLA', 'AAPL', 'AMD']
+ALL_TRADE_SYMBOLS = TRADE_SYMBOLS + ['AVGO', 'LRCX', 'TSM', 'ARM']   # (21 نوفمبر) ترجع كلها مع تنبيهات TradingView (بدون حد طلبات)
 SYMBOLS = TRADE_SYMBOLS + ['SPY']   # SPY للفلتر فقط (فوق VWAP)، ما يتداول
 STEP = 900; NY = ZoneInfo('America/New_York'); RY = ZoneInfo('Asia/Riyadh')
 TGT, STP, VOLX, WIN_MIN, COST_PCT = 2.0, 3.0, 1.2, 120, 0.03
