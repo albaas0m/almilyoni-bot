@@ -110,12 +110,13 @@ def webhook_signals(now, st):
         try: x = json.loads(ev.get('message', ''))
         except ValueError: log('⚠️ تنبيه مو مفهوم:', ev.get('message', '')[:120]); continue
         if NTFY_KEY and x.get('k') != NTFY_KEY: log('⚠️ تنبيه برمز غلط، تجاهلته'); continue
-        sym, side = str(x.get('sym', '')).upper(), x.get('side')
+        sym, side = str(x.get('sym', '')).upper().split(':')[-1], x.get('side')
+        side = {1: 'C', -1: 'P', 1.0: 'C', -1.0: 'P'}.get(side, side)       # alertcondition يرسل 1/-1
         if sym not in m.TRADE_SYMBOLS or side not in ('C', 'P'): continue
         if now - float(x.get('t', 0)) > 600: log('تنبيه قديم، تجاهلته:', sym, side); continue
         sgn = 1 if side == 'C' else -1; a = float(x['atr']); e = stock_px(sym)
         log('📩 إشارة من TradingView:', sym, side, 'سعر أبيان', e)
-        out.append(dict(symbol=sym, side=side, t_entry=int(x['t']), entry=round(e, 2), atr=a,
+        out.append(dict(symbol=sym, side=side, t_entry=int(float(x['t'])), entry=round(e, 2), atr=a,
                         target=round(e + sgn * m.TGT * a, 2), stop=round(e - sgn * m.STP * a, 2)))
     return out
 

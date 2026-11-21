@@ -3,14 +3,13 @@
 // نفس شروط almilyoni_weekly.trades_for بالضبط، والحساب على سيرفرات TradingView بدل ما البوت يطلب الشموع.
 // حطه على شارت 15 دقيقة (ساعات السوق العادية بس، بدون ما قبل/بعد السوق) لكل سهم: NVDA, TSLA, AAPL, AMD, AVGO, LRCX, TSM, ARM (8 تنبيهات)
 // ⚠️ أي تعديل على هالكود ما يوصل للتنبيهات القائمة: لازم تنحذف التنبيهات الـ8 وتنسوى من جديد (ملاحظة Gemini).
-// التنبيه: Condition = هذا المؤشر ← "Any alert() function call"، وWebhook URL = رابط ntfy اللي عطاك إياه Claude.
+// التنبيه: Condition = هذا المؤشر ← "المليوني إشارة" (مرة عند إغلاق الشمعة)، وWebhook URL = رابط ntfy اللي عطاك إياه Claude.
 //
 // CALL: UT Buy (ATR10، حساسية 1) + إغلاق فوق ZLSMA32 + فوق VWAP + SPY فوق VWAP حقه + السهم تحت EMA50 اليومي (عكس الترند)
 // PUT : UT Sell + إغلاق تحت ZLSMA32 + تحت VWAP + SPY تحت VWAP حقه + السهم فوق EMA50 اليومي
 // + حجم ≥ 1.2× متوسط 20 شمعة، خلال أول 120 دقيقة (أو لين 3:00 نيويورك إذا الحجم ≥ 2×). مو آخر شمعة في الجلسة.
 indicator("المليوني v3 — تنبيهات البوت", overlay = true)
 
-key = input.string("", "الرمز السري (من Claude)")
 spySym = input.symbol("AMEX:SPY", "SPY")
 
 // ZLSMA 32
@@ -55,6 +54,10 @@ plot(zl, "ZLSMA", color.yellow, 2)
 plotshape(callSig, "CALL", shape.triangleup, location.belowbar, color.green, size = size.small)
 plotshape(putSig, "PUT", shape.triangledown, location.abovebar, color.red, size = size.small)
 
-if barstate.isconfirmed and (callSig or putSig)
-    msg = '{"k":"' + key + '","sym":"' + syminfo.ticker + '","side":"' + (callSig ? "C" : "P") + '","t":' + str.tostring(time_close / 1000) + ',"c":' + str.tostring(close) + ',"atr":' + str.tostring(a) + '}'
-    alert(msg, alert.freq_once_per_bar_close)
+plot(callSig ? 1 : putSig ? -1 : 0, "SIDE", display = display.none)
+plot(a, "ATR", display = display.none)
+plot(time_close / 1000, "TCLOSE", display = display.none)
+
+// (21 نوفمبر) alertcondition بدل alert(): نافذة التنبيه في حساب أحمد ما تعرض "Any alert() function call".
+// الرمز السري ينكتب في نسخة TradingView بس (مو في الريبو العام): غيّر KEY هنا.
+alertcondition(callSig or putSig, "المليوني إشارة", '{"k":"KEY","sym":"{{ticker}}","side":{{plot("SIDE")}},"t":{{plot("TCLOSE")}},"c":{{close}},"atr":{{plot("ATR")}}}')
