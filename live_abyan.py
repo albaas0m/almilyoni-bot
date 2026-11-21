@@ -43,7 +43,7 @@ def load():
 def save(st, msg, data=False):
     LIVE.write_text(json.dumps(st, ensure_ascii=False, indent=1))
     # (20 نوفمبر) كان git pull --rebase يفشل بسبب تعديلات data/ غير المحفوظة فما ينرفع شي أبداً: --autostash + إعادة محاولة + نسجل الفشل
-    cmd = ('git add live.json abyan_token.enc tv_token.enc' + (' data' if data else '') + ' && (git diff --cached --quiet || git commit -qm "' + msg + '") && '
+    cmd = ('(git add tv_quota.json 2>/dev/null; true) && git add live.json abyan_token.enc tv_token.enc' + (' data' if data else '') + ' && (git diff --cached --quiet || git commit -qm "' + msg + '") && '
            'for i in 1 2 3; do git pull -q --rebase --autostash origin main && git push -q && exit 0; sleep 5; done; exit 1')
     try:   # نحفظ في الريبو على طول (عشان لو الجوب انقطع ما يضيع شي)
         r = subprocess.run(cmd, shell=True, cwd=ROOT, timeout=180, capture_output=True, text=True, executable='/bin/bash')
@@ -115,7 +115,11 @@ def new_signals(now, st):
     except Exception as e:
         if isinstance(e, tv.QuotaError) and now >= TV_BLOCK_UNTIL:    # نكمل باللي عندنا ونعيد بعد الكولداون
             TV_FAILS += 1; TV_BLOCK_UNTIL = now + (60 if TV_FAILS >= 3 else 11) * 60
-        log('TradingView ما رد، أستخدم ياهو هالمرة:', e); f.update_data()
+        log('TradingView ما رد، أستخدم ياهو هالمرة:', e)
+        try:
+            info = f.update_data(); bad = {k: v for k, v in info.items() if 'ما رجع' in v}
+            if bad: log('⚠️ ياهو بعد ما رجّع شموع:', bad)
+        except Exception as e2: log('⚠️ ياهو فشل:', e2)
     data = f.load_data()
     for s in m.SYMBOLS:
         lt = data[s][-1]['t'] if data.get(s) else 0
@@ -185,13 +189,11 @@ def main():
             done_today = closed_day(d) or mins >= cm + 2          # بعد الإغلاق أو ويكند أو عطلة
             if not closed_day(d) and mins >= cm + 2 and closed != d.date():     # السوق سكر: نحفظ شموع اليوم للتسجيل
                 closed = d.date(); save(st, 'لحظي: إغلاق السوق', data=True); log('السوق سكر')
-            if done_today or now - last_rec > 1800:                # نسجل الأيام الناقصة (بدون Claude)
-                last_rec = now
+            # (21 نوفمبر) التسجيل الآلي بعد الإغلاق بس — قبل الافتتاح كان ياكل حد TradingView ويقفله طول وقت السوق
+            if done_today:
                 try:
                     import record_auto
-                    lim = T0 + JOB_SEC - 600
-                    if not closed_day(d) and mins < -2: lim = min(lim, now + (-mins - 5) * 60)     # قبل الافتتاح: نخلص قبله بـ5 دقايق
-                    record_auto.run_missing(deadline=lim); st = load()
+                    record_auto.run_missing(deadline=T0 + JOB_SEC - 600); st = load()
                 except Exception: log('التسجيل الآلي:', traceback.format_exc()[-400:])
             if done_today:
                 # (20 نوفمبر، طلب أحمد) البوت يشتغل بس وقت السوق: مهمة مجدولة تشغّله 8:58 نيويورك (قبل الافتتاح بنص ساعة)،

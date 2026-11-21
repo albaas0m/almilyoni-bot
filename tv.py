@@ -102,10 +102,45 @@ class QuotaError(RuntimeError):
     """حد TradingView اليومي/الدقيقة (TOOL_QUOTA_EXCEEDED) — فيه كولداون ~10 دقايق."""
 
 
+# (21 نوفمبر) حارس الحد المشترك: يوم 20 نوفمبر الحد كان مخلص طول اليوم لأن البوت يعيد الطلب كل 11 دقيقة
+# (التسجيل الآلي + اللحظي)، وكل طلب فاشل يتحسب ويرجّع الكولداون، فالحد ما يرجع أبد ولا انسجلت ولا صفقة.
+# الحين: أي سكربت ياخذ خطأ حد → ينحفظ في tv_quota.json (ينرفع للريبو)، ومحد يطلب TradingView لين يخلص الانتظار.
+# الانتظار يتضاعف مع كل فشل متتالي (30د، 60د، 120د… أقصى ساعتين)، ويرجع طبيعي أول طلب ينجح.
+QUOTA = ROOT / 'tv_quota.json'
+
+
+def _qstate():
+    try: return json.loads(QUOTA.read_text())
+    except Exception: return {}
+
+
+def blocked_until():
+    return float(_qstate().get('until', 0))
+
+
+def _qfail(msg):
+    q = _qstate(); n = int(q.get('fails', 0)) + 1
+    wait = min(30 * 2 ** (n - 1), 120) * 60
+    q.update(fails=n, until=time.time() + wait, last_error=str(msg)[:200], at=int(time.time()))
+    QUOTA.write_text(json.dumps(q, ensure_ascii=False, indent=1))
+
+
+def _qok():
+    if _qstate().get('fails'): QUOTA.write_text(json.dumps({'fails': 0, 'until': 0}, indent=1))
+
+
 def _is_quota(txt): return any(w in txt.upper() for w in ('QUOTA', 'COOLDOWN', 'USAGE LIMIT', 'RATE LIMIT', 'TOO MANY'))
 
 
 def call(tool, args):
+    if time.time() < blocked_until():
+        raise QuotaError(f"حد TradingView: ما نطلب لين {time.strftime('%H:%M UTC', time.gmtime(blocked_until()))} (حماية الحد)")
+    try: r = _call(tool, args)
+    except QuotaError as e: _qfail(e); raise
+    _qok(); return r
+
+
+def _call(tool, args):
     at = access_token()
     for url in MCP_URLS:
         h = {'Authorization': f'Bearer {at}', 'Accept': 'application/json, text/event-stream'}

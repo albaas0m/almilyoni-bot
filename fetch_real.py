@@ -37,17 +37,22 @@ NY = m.NY
 
 # ───────── ياهو ─────────
 def yget(sym, **params):
-    url = f'https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}?' + urllib.parse.urlencode(params)
+    """(21 نوفمبر) نجرب query1 وquery2 ونطبع سبب الفشل (قبل كان يرجّع None بصمت وتبقى الشموع قديمة)."""
+    q = urllib.parse.urlencode(params); err = None
     for k in range(4):
+        host = ('query1', 'query2')[k % 2]
+        url = f'https://{host}.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}?' + q
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=30) as r:
                 res = json.loads(r.read())['chart']['result']
             return res[0] if res else None
         except urllib.error.HTTPError as e:
-            if e.code in (400, 404): return None
+            err = f'HTTP {e.code}'
+            if e.code in (400, 404): break
             time.sleep(4 * (k + 1))
-        except Exception:
-            time.sleep(4 * (k + 1))
+        except Exception as e:
+            err = str(e)[:120]; time.sleep(4 * (k + 1))
+    print(f'ياهو {sym}: {err}', flush=True)
     return None
 
 
