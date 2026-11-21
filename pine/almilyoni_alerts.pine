@@ -1,0 +1,61 @@
+//@version=6
+// المليوني v3 — تنبيهات البوت (21 نوفمبر 2026)
+// نفس شروط almilyoni_weekly.trades_for بالضبط، والحساب على سيرفرات TradingView بدل ما البوت يطلب الشموع.
+// حطه على شارت 15 دقيقة (ساعات السوق العادية بس، بدون ما قبل/بعد السوق) لكل سهم: NVDA, TSLA, AAPL, AMD
+// التنبيه: Condition = هذا المؤشر ← "Any alert() function call"، وWebhook URL = رابط ntfy اللي عطاك إياه Claude.
+//
+// CALL: UT Buy (ATR10، حساسية 1) + إغلاق فوق ZLSMA32 + فوق VWAP + SPY فوق VWAP حقه + السهم تحت EMA50 اليومي (عكس الترند)
+// PUT : UT Sell + إغلاق تحت ZLSMA32 + تحت VWAP + SPY تحت VWAP حقه + السهم فوق EMA50 اليومي
+// + حجم ≥ 1.2× متوسط 20 شمعة، خلال أول 120 دقيقة (أو لين 3:00 نيويورك إذا الحجم ≥ 2×). مو آخر شمعة في الجلسة.
+indicator("المليوني v3 — تنبيهات البوت", overlay = true)
+
+key = input.string("", "الرمز السري (من Claude)")
+spySym = input.symbol("AMEX:SPY", "SPY")
+
+// ZLSMA 32
+lsma = ta.linreg(close, 32, 0)
+zl = 2 * lsma - ta.linreg(lsma, 32, 0)
+
+// UT Bot (ATR 10، حساسية 1) — نفس ut_zlsma في البايثون
+a = ta.atr(10)
+var float ts = na
+float old = ts
+float p = nz(old, 0)
+if not na(a)
+    ts := close > p and close[1] > p ? math.max(p, close - a) : close < p and close[1] < p ? math.min(p, close + a) : close > p ? close - a : close + a
+utBuy = not na(old) and close > ts and close[1] <= old
+utSell = not na(old) and close < ts and close[1] >= old
+
+// VWAP الجلسة للسهم وSPY
+vw = ta.vwap(hlc3)
+[spyC, spyVw] = request.security(spySym, timeframe.period, [close, ta.vwap(hlc3)])
+
+// EMA50 اليومي من إغلاقات الجلسات المكتملة قبل اليوم (بدون نظر للمستقبل)
+var float emaD = na
+var int nSess = 0
+var float emaPrev = na
+var int sessBefore = 0
+if session.isfirstbar_regular
+    emaPrev := nSess >= 50 ? emaD : na
+    sessBefore := nSess
+lastBar = session.islastbar_regular
+if lastBar
+    nSess += 1
+    emaD := na(emaD) ? close : emaD + (close - emaD) * 2 / 51
+
+// الحجم والوقت (دقايق افتتاح الشمعة الجاية من 9:30 نيويورك)
+vavg = ta.sma(volume, 20)[1]
+mins = hour(time_close, "America/New_York") * 60 + minute(time_close, "America/New_York") - 570
+timeOk = mins >= 0 and mins <= 330 and (mins <= 120 or volume >= 2.0 * vavg)
+base = not lastBar and not na(zl) and not na(zl[3]) and sessBefore >= 10 and not na(emaPrev) and volume >= 1.2 * vavg and timeOk
+
+callSig = base and utBuy and close > zl and close > vw and spyC > spyVw and close < emaPrev
+putSig = base and utSell and close < zl and close < vw and spyC < spyVw and close > emaPrev
+
+plot(zl, "ZLSMA", color.yellow, 2)
+plotshape(callSig, "CALL", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(putSig, "PUT", shape.triangledown, location.abovebar, color.red, size = size.small)
+
+if barstate.isconfirmed and (callSig or putSig)
+    msg = '{"k":"' + key + '","sym":"' + syminfo.ticker + '","side":"' + (callSig ? "C" : "P") + '","t":' + str.tostring(time_close / 1000) + ',"c":' + str.tostring(close) + ',"atr":' + str.tostring(a) + '}'
+    alert(msg, alert.freq_once_per_bar_close)

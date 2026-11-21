@@ -27,6 +27,8 @@ jobs:
       - name: المراقبة اللحظية
         env:
           ABYAN_KEY: ${{ secrets.ABYAN_KEY }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_KEY: ${{ secrets.NTFY_KEY }}
         run: |
           git config user.name "almilyoni-bot"; git config user.email "almilyoni-bot@users.noreply.github.com"
           if [ -n "${{ github.event.inputs.test }}" ]; then python3 live_abyan.py --test ${{ github.event.inputs.test }}; else python3 live_abyan.py; fi

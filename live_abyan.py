@@ -8,7 +8,7 @@
   python3 live_abyan.py            # يشتغل لين نهاية الجلسة أو حد وقت الجوب (5:50 ساعة)
   python3 live_abyan.py --once     # جولة وحدة (اختبار)
 """
-import json, math, time, argparse, subprocess, traceback
+import os, json, math, time, argparse, subprocess, traceback, urllib.request, urllib.parse
 from pathlib import Path
 from datetime import datetime, date, timedelta
 import almilyoni_weekly as m
@@ -86,6 +86,37 @@ def pick_contract(sym, side, S, now):
             nk = f.jump_strike(side, S, K, T, iv, inc, too_exp) if iv else None
             queue.insert(0, nk if nk else round(K + (step if too_exp else -step), 2))
     return None
+
+
+# ───────── الإشارات من تنبيهات TradingView (21 نوفمبر) ─────────
+# الاستراتيجية تنحسب على سيرفرات TradingView (pine/almilyoni_alerts.pine) والتنبيه يرسل الإشارة لـ ntfy.sh،
+# والبوت يقراها كل دقيقة: صفر طلبات من حد TradingView وقت السوق. يشتغل إذا فيه سر NTFY_TOPIC وملف webhook_on.
+NTFY_TOPIC = os.environ.get('NTFY_TOPIC', ''); NTFY_KEY = os.environ.get('NTFY_KEY', '')
+WEBHOOK = bool(NTFY_TOPIC) and (ROOT / 'webhook_on').exists()
+
+
+def webhook_signals(now, st):
+    w = st.setdefault('ntfy', {}); since = w.get('last_id') or '1h'
+    url = f'https://ntfy.sh/{urllib.parse.quote(NTFY_TOPIC)}/json?poll=1&since={urllib.parse.quote(str(since))}'
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'almilyoni-bot/1'}), timeout=20) as r:
+        lines = r.read().decode().splitlines()
+    out = []
+    for ln in lines:
+        try: ev = json.loads(ln)
+        except ValueError: continue
+        if ev.get('event') != 'message': continue
+        w['last_id'] = ev['id']
+        try: x = json.loads(ev.get('message', ''))
+        except ValueError: log('⚠️ تنبيه مو مفهوم:', ev.get('message', '')[:120]); continue
+        if NTFY_KEY and x.get('k') != NTFY_KEY: log('⚠️ تنبيه برمز غلط، تجاهلته'); continue
+        sym, side = str(x.get('sym', '')).upper(), x.get('side')
+        if sym not in m.TRADE_SYMBOLS or side not in ('C', 'P'): continue
+        if now - float(x.get('t', 0)) > 600: log('تنبيه قديم، تجاهلته:', sym, side); continue
+        sgn = 1 if side == 'C' else -1; a = float(x['atr']); e = stock_px(sym)
+        log('📩 إشارة من TradingView:', sym, side, 'سعر أبيان', e)
+        out.append(dict(symbol=sym, side=side, t_entry=int(x['t']), entry=round(e, 2), atr=a,
+                        target=round(e + sgn * m.TGT * a, 2), stop=round(e - sgn * m.STP * a, 2)))
+    return out
 
 
 # ───────── الإشارات ─────────
@@ -174,7 +205,7 @@ def main():
         t0 = time.time(); S = stock_px(a.test[0]); c = pick_contract(a.test[0], a.test[1], S, time.time())
         log(a.test, 'السهم', S, '← العقد', c and (c[0].isoformat(), c[1], f'{c[2] * 100:.0f}$'), f'({time.time() - t0:.1f} ثانية)')
         save(load(), 'لحظي: اختبار'); return
-    st = load(); last_bar = None; closed = None; last_rec = 0.0; last_keep = 0.0
+    st = load(); log('مصدر الإشارات:', 'تنبيهات TradingView (ntfy)' if WEBHOOK else 'طلب الشموع من TradingView'); last_bar = None; closed = None; last_rec = 0.0; last_keep = 0.0
     while True:
         now = time.time(); d = datetime.fromtimestamp(now, NY); mins = d.hour * 60 + d.minute - 570; cm = close_min(d)
         if time.time() - T0 > JOB_SEC:
@@ -202,7 +233,10 @@ def main():
             time.sleep(60); continue
         try:
             bar = int(now) // 900
-            if 0 <= mins <= m.LATE_MIN + 1 and bar != last_bar and now % 900 >= 25:   # 25 ثانية بعد إغلاق الشمعة
+            if WEBHOOK:                                                                # كل دقيقة: نقرا التنبيهات (بدون TradingView)
+                if 0 <= mins <= m.LATE_MIN + 16:
+                    for t in webhook_signals(now, st): enter(st, t, now)
+            elif 0 <= mins <= m.LATE_MIN + 1 and bar != last_bar and now % 900 >= 25:   # 25 ثانية بعد إغلاق الشمعة
                 last_bar = bar
                 for t in new_signals(now, st): enter(st, t, now)
             check_exits(st, now, close_all=mins >= cm - 1)                             # دقيقة قبل الإغلاق يقفل الكل
