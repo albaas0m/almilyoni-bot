@@ -1319,6 +1319,46 @@
    "time_value": 9.75,
    "skip": "سيولة ضعيفة",
    "drtip_skip": false
+  },
+  {
+   "id": "2026-11-18-AMD-0",
+   "day": "2026-11-18",
+   "symbol": "AMD",
+   "side": "C",
+   "t_entry": 1795014000,
+   "t_exit": 1795034700,
+   "entry": 514.66,
+   "target": 532.39,
+   "stop": 488.07,
+   "exit": 530.33,
+   "why": "نهاية الجلسة",
+   "stock_pct": 3.015,
+   "prev_buy_vol_pct": 54.8,
+   "ema50d": 532.04,
+   "adr": 36.43,
+   "before10": false,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": 326.0,
+   "vix_skip": null,
+   "strike": 615.0,
+   "expiry": "2026-12-02",
+   "premium": 468,
+   "exit_premium": 495,
+   "opt_usd": 25,
+   "opt_pct": 5.3,
+   "exit_price_source": "سعر العقد الحقيقي (TradingView)",
+   "over_budget": false,
+   "opt_usd_worst": 25,
+   "opt_exit_t": 1795035120,
+   "opt_symbol": "AMD261202C00615000",
+   "opt_day_vol": 302,
+   "opt_vol_minutes": 360,
+   "bucket": "14",
+   "time_value": 4.68,
+   "skip": "",
+   "drtip_skip": false
   }
  ],
  "days": {
@@ -1397,6 +1437,10 @@
   "2026-11-17": {
    "n": 1,
    "updated": "2026-11-21 08:08"
+  },
+  "2026-11-18": {
+   "n": 1,
+   "updated": "2026-11-22 16:59"
   }
  }
 }
