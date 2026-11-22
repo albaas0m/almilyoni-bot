@@ -1359,6 +1359,46 @@
    "time_value": 4.68,
    "skip": "",
    "drtip_skip": false
+  },
+  {
+   "id": "2026-11-19-NVDA-0",
+   "day": "2026-11-19",
+   "symbol": "NVDA",
+   "side": "C",
+   "t_entry": 1795099500,
+   "t_exit": 1795102200,
+   "entry": 157.81,
+   "target": 160.96,
+   "stop": 153.08,
+   "exit": 153.08,
+   "why": "وقف",
+   "stock_pct": -3.025,
+   "prev_buy_vol_pct": 30.3,
+   "ema50d": 200.91,
+   "adr": 9.336,
+   "before10": true,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": -234.0,
+   "vix_skip": null,
+   "strike": 160.0,
+   "expiry": "2026-12-02",
+   "premium": 510,
+   "exit_premium": 330,
+   "opt_usd": -182,
+   "opt_pct": -35.6,
+   "exit_price_source": "سعر العقد الحقيقي (TradingView)",
+   "over_budget": false,
+   "opt_usd_worst": -183,
+   "opt_exit_t": 1795102200,
+   "opt_symbol": "NVDA261202C00160000",
+   "opt_day_vol": 3030,
+   "opt_vol_minutes": 375,
+   "bucket": "14",
+   "time_value": 5.1,
+   "skip": "",
+   "drtip_skip": true
   }
  ],
  "days": {
@@ -1439,6 +1479,10 @@
    "updated": "2026-11-21 08:08"
   },
   "2026-11-18": {
+   "n": 1,
+   "updated": "2026-11-22 16:59"
+  },
+  "2026-11-19": {
    "n": 1,
    "updated": "2026-11-22 16:59"
   }
