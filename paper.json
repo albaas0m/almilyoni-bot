@@ -1399,6 +1399,46 @@
    "time_value": 5.1,
    "skip": "",
    "drtip_skip": true
+  },
+  {
+   "id": "2026-11-20-TSLA-0",
+   "day": "2026-11-20",
+   "symbol": "TSLA",
+   "side": "C",
+   "t_entry": 1795186800,
+   "t_exit": 1795187700,
+   "entry": 373.04,
+   "target": 380.16,
+   "stop": 362.36,
+   "exit": 362.36,
+   "why": "وقف",
+   "stock_pct": -2.892,
+   "prev_buy_vol_pct": 30.2,
+   "ema50d": 376.85,
+   "adr": 16.232,
+   "before10": false,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": -369.0,
+   "vix_skip": null,
+   "strike": 395.0,
+   "expiry": "2026-12-04",
+   "premium": 680,
+   "exit_premium": 420,
+   "opt_usd": -262,
+   "opt_pct": -38.5,
+   "exit_price_source": "سعر العقد الحقيقي (TradingView)",
+   "over_budget": false,
+   "opt_usd_worst": -262,
+   "opt_exit_t": 1795188300,
+   "opt_symbol": "TSLA261204C00395000",
+   "opt_day_vol": 482,
+   "opt_vol_minutes": 360,
+   "bucket": "14",
+   "time_value": 6.8,
+   "skip": "",
+   "drtip_skip": false
   }
  ],
  "days": {
@@ -1485,6 +1525,10 @@
   "2026-11-19": {
    "n": 1,
    "updated": "2026-11-22 16:59"
+  },
+  "2026-11-20": {
+   "n": 1,
+   "updated": "2026-11-24 00:02"
   }
  }
 }
