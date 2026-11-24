@@ -69,26 +69,53 @@ def expiries(sym, d0):
     return main + sorted([x for x in exps if 7 <= (x - d0).days <= 35 and x not in main], key=key)
 
 
-def pick_contract(sym, side, S, now, price=None, max_calls=None):
-    """أي سترايك سعره من أبيان بين 100$ و1000$ (يقفز بالتذبذب المحسوب من سعر أبيان نفسه).
-    price(sym, exp, side, K) = دالة التسعير (الافتراضي سعر أبيان الحين؛ الأثر الرجعي يمرر سعر OPRA وقت الإشارة)."""
-    price = price or opt_px; calls = [0]
-    inc = 2.5 if S < 250 else 5.0; step = inc if side == 'C' else -inc
-    for exp in expiries(sym, datetime.fromtimestamp(now, NY).date())[:3]:
-        K = math.ceil(S / inc) * inc if side == 'C' else math.floor(S / inc) * inc
-        queue, seen = [K], set()
-        while queue and len(seen) < MAX_STRIKES:
-            K = queue.pop(0)
-            if K <= 0 or K in seen: continue
-            if max_calls is not None and calls[0] >= max_calls: log(f'⚠️ وصلت سقف طلبات التسعير ({max_calls}) بدون عقد مناسب'); return None
-            seen.add(K); calls[0] += 1; p = price(sym, exp, side, K)
-            if not p: queue += [round(K + step, 2), round(K - step, 2)]; continue
-            if m.PREM_MIN <= p * 100 and p * 100 + m.COMM <= m.BUDGET: return exp, K, p
-            too_exp = p * 100 + m.COMM > m.BUDGET
-            T = m.yearfrac(now, exp.isoformat()); iv = m.implied_vol(p, S, K, T, side)
-            nk = f.jump_strike(side, S, K, T, iv, inc, too_exp) if iv else None
-            queue.insert(0, nk if nk else round(K + (step if too_exp else -step), 2))
-    return None
+import contract_select as cs
+TV_LIQ_ON = (ROOT / 'tv_liquidity_on').exists()      # بيانات السيولة من TradingView (طلب واحد لكل دخول): مطفية افتراضياً (حد الطلبات)
+
+
+def tv_liquidity(sym, side, cands, now, st):
+    """حجم/OI/سبريد من TradingView (get_symbol_data_batch، طلب واحد). ما تشتغل إلا بملف tv_liquidity_on، وتفشل بهدوء (None) بدون ما تأكل الحد.
+    (24 نوفمبر) أبيان ما يعطي إلا fmv، فهذا المصدر الوحيد للسيولة؛ شكل رد الأداة ما اتجرب لسا (الحد خلص) فالقراءة متساهلة."""
+    if not TV_LIQ_ON or not cands: return {}
+    try:
+        tv_count(tv_budget(now, st))
+        syms = {opra(sym, c['exp'], side, c['K']): c for c in cands[:50]}
+        r = tv.call('mcp-tv-get-symbol-data-batch', dict(symbols=list(syms), columns=['volume', 'bid', 'ask', 'open_interest']))
+        rows = next((r[k] for k in ('symbols', 'data', 'results', 'rows') if isinstance(r, dict) and isinstance(r.get(k), list)), r if isinstance(r, list) else [])
+        for row in rows:
+            c = syms.get(row.get('symbol') or row.get('s') or row.get('name'))
+            if c:
+                for k, src in (('vol', 'volume'), ('oi', 'open_interest'), ('bid', 'bid'), ('ask', 'ask')):
+                    if row.get(src) is not None: c[k] = float(row[src])
+                if c.get('bid') and c.get('ask') and c['ask'] >= c['bid']: c['spread'] = (c['ask'] - c['bid']) / ((c['ask'] + c['bid']) / 2)
+    except (Exception, SystemExit) as e: log('⚠️ بيانات السيولة من TradingView ما انجابت (أكمل بدونها):', repr(e)[:160])
+    return {}
+
+
+def gather_live(sym, side, S, now, n_exp=3, per_exp=6):
+    """كل المرشحين من سلسلة أبيان لأقرب 3 تواريخ: السترايكات الموجودة فعلاً، نختار اللي دلتاها المتوقعة (من تذبذب أقرب سترايك) بين 0.2 و0.62،
+    ونسعّر كل واحد من أبيان (fmv). بدون TradingView."""
+    typ = {'C': 'call', 'P': 'put'}[side]; out = []; d0 = datetime.fromtimestamp(now, NY).date()
+    for exp in expiries(sym, d0)[:n_exp]:
+        ks = sorted({float(c['strike_price']) for c in abyan.call('browse_options_chain', dict(symbol=sym, expiration_date=exp.isoformat(), type=typ, limit=250)).get('contracts', [])})
+        if not ks: continue
+        atm = min(ks, key=lambda k: abs(k - S)); p0 = opt_px(sym, exp, side, atm); c0 = cs.make_cand(exp, side, atm, p0, S, now) if p0 else None
+        iv0 = c0['iv'] if c0 else 0.45; T = m.yearfrac(now, exp.isoformat())
+        near = sorted((k for k in ks if 0.2 <= abs(cs.bs_delta(side, S, k, T, iv0)) <= 0.62 and k != atm), key=lambda k: abs(abs(cs.bs_delta(side, S, k, T, iv0)) - 0.42))[:per_exp]
+        if c0: out.append(c0)
+        for k in near:
+            p = opt_px(sym, exp, side, k); c = cs.make_cand(exp, side, k, p, S, now) if p else None
+            if c: out.append(c)
+    return out
+
+
+def choose_contract(sym, side, S, a, now, st=None):
+    """(24 نوفمبر) المفاضلة الجديدة (contract_select) بدل أول عقد في الميزانية. يرجع sel (فيه c + حقول التسجيل) أو None."""
+    cands = gather_live(sym, side, S, now)
+    if st is not None: tv_liquidity(sym, side, cands, now, st)
+    sel, why = cs.select(cands, side, S, a)
+    if not sel: log('ما لقيت عقد:', sym, side, why, f'({len(cands)} مرشح)')
+    return sel
 
 
 # ───────── الإشارات من تنبيهات TradingView (21 نوفمبر) ─────────
@@ -226,41 +253,34 @@ def opra(sym, exp, side, K): return f"OPRA:{sym}{exp:%y%m%d}{side}{K:.1f}"      
 RETRO_WIN, RETRO_MIN_VOL = 300, 5      # نافذة الدخول بعد الإشارة (ثانية) · أقل حجم للعقد (من افتتاح الجلسة لين نهاية النافذة)
 
 
-def retro_pick(sym, side, S, t0, now, st):
-    """(24 نوفمبر، قرار أحمد: أرقام حقيقية بس) العقد المقبول لازم عليه صفقة حقيقية من وقت الإشارة لين 5 دقايق بعدها، والدخول = أول صفقة حقيقية بعد الإشارة.
-    ممنوع أي سعر قبل الإشارة. بين العقود المقبولة (100–1000$ وحجمها ≥ RETRO_MIN_VOL) نختار الأعلى حجم. الطلبات محدودة بـ RETRO_MAX_CALLS.
-    يرجع (عقد أو None، سبب الفشل). طلب واحد لكل عقد: من افتتاح الجلسة (للحجم) لين نهاية النافذة."""
-    inc = 2.5 if S < 250 else 5.0; step = inc if side == 'C' else -inc
+def retro_pick(sym, side, S, t0, now, st, a):
+    """(24 نوفمبر) نفس منطق المفاضلة (contract_select) بس بأرقام حقيقية: المرشح لازم عليه صفقة حقيقية من وقت الإشارة لين 5 دقايق بعدها،
+    وسعره = أول صفقة بعد الإشارة (ممنوع أي سعر قبلها). حجم الجلسة (من الافتتاح لين نهاية النافذة) ≥ RETRO_MIN_VOL شرط ثابت.
+    ترتيب التجربة بالدلتا المتوقعة (تذبذب أول مرشح له صفقة)، وسقف RETRO_MAX_CALLS طلب. يرجع (sel أو None، سبب)."""
     d0 = datetime.fromtimestamp(t0, NY); open_t = int(d0.replace(hour=9, minute=30, second=0, microsecond=0).timestamp()); end = min(int(now), t0 + RETRO_WIN)
-    calls, why = 0, []
+    typ = {'C': 'call', 'P': 'put'}[side]; calls, why, cands = 0, [], []
     for exp in expiries(sym, d0.date())[:3]:
-        K = math.ceil(S / inc) * inc if side == 'C' else math.floor(S / inc) * inc
-        queue, seen, cands = [K], set(), []
-        while queue:
-            K = queue.pop(0)
-            if K <= 0 or K in seen: continue
-            if calls >= RETRO_MAX_CALLS: why.append(f'وصلت سقف {RETRO_MAX_CALLS} طلبات'); return best_retro(cands), '؛ '.join(why)
-            seen.add(K); calls += 1; tv_count(tv_budget(now, st))
-            bs = tv_bars(opra(sym, exp, side, K), open_t, end, 200)
+        ks = sorted({float(c['strike_price']) for c in abyan.call('browse_options_chain', dict(symbol=sym, expiration_date=exp.isoformat(), type=typ, limit=250)).get('contracts', [])})
+        if not ks: continue
+        T = m.yearfrac(t0, exp.isoformat()); iv = 0.45; tried = set(); got = []
+        order = lambda ivx: sorted(ks, key=lambda k: abs(abs(cs.bs_delta(side, S, k, T, ivx)) - 0.42))
+        while calls < RETRO_MAX_CALLS:
+            nxt = next((k for k in order(iv) if k not in tried), None)
+            if nxt is None: break
+            tried.add(nxt); calls += 1; tv_count(tv_budget(now, st))
+            bs = tv_bars(opra(sym, exp, side, nxt), open_t, end, 200)
             vol = sum(b['v'] for b in bs); first = next((b for b in bs if t0 <= b['t'] <= end and b['v'] > 0), None)
-            ref = first or (bs[-1] if bs else None)                 # للتنقل بين السترايكات بس (ما يتسجل أبداً)
-            if not ref: queue += [round(K + step, 2), round(K - step, 2)]; why.append(f'{exp} {K}: ما تداول'); continue
-            px = first['o'] if first else ref['c']; cost = px * 100 + m.COMM
-            if m.PREM_MIN <= px * 100 and cost <= m.BUDGET:
-                if not first: why.append(f'{exp} {K}: ما فيه صفقة خلال 5 دقايق من الإشارة')
-                elif vol < RETRO_MIN_VOL: why.append(f'{exp} {K}: سيولة ضعيفة (حجم {vol})')
-                else: cands.append(dict(exp=exp, K=K, p=first['o'], hi=first['h'], t=first['t'], vol=vol, day_vol=vol))
-                if len(cands) < 2: queue.append(round(K - step, 2))       # الأقرب للسعر أعلى سيولة غالباً
-                continue
-            too_exp = cost > m.BUDGET; why.append(f"{exp} {K}: {'فوق' if too_exp else 'تحت'} الميزانية")
-            T = m.yearfrac(t0, exp.isoformat()); iv = m.implied_vol(px, S, K, T, side)
-            nk = f.jump_strike(side, S, K, T, iv, inc, too_exp) if iv else None
-            queue.insert(0, nk if nk else round(K + (step if too_exp else -step), 2))
-        if cands: return best_retro(cands), '؛ '.join(why)
-    return None, '؛ '.join(why) or 'ما فيه تواريخ انتهاء مناسبة'
-
-
-def best_retro(c): return max(c, key=lambda x: x['vol']) if c else None
+            if not first: why.append(f'{exp} {nxt}: ما فيه صفقة خلال 5 دقايق من الإشارة'); continue
+            c = cs.make_cand(exp, side, nxt, first['o'], S, t0, vol=vol)
+            if not c: why.append(f'{exp} {nxt}: ما قدرت أحسب التذبذب'); continue
+            iv = c['iv']                                              # التجربة الجاية بالدلتا المتوقعة من تذبذب حقيقي
+            if vol < RETRO_MIN_VOL: why.append(f'{exp} {nxt}: سيولة ضعيفة (حجم {vol})'); continue
+            c.update(t=first['t'], hi=first['h']); cands.append(c); got.append(c)
+            if len(got) >= 3: break
+        if cands: break
+    sel, w2 = cs.select(cands, side, S, a)
+    if not sel: why.append(w2 or 'ما فيه مرشح')
+    return sel, '؛ '.join(why[-8:]) + (f' (وصلت سقف {RETRO_MAX_CALLS} طلبات)' if calls >= RETRO_MAX_CALLS else '')
 
 
 def retro_enter(st, sig, now, fire_id=None, wh=None):
@@ -284,7 +304,7 @@ def retro_enter(st, sig, now, fire_id=None, wh=None):
         st.setdefault('missed', []).append(dict(key=key, symbol=sym, side=side, t_entry=t0, fire_id=fire_id, why=f'خلصت ({h[1]}) قبل ما نلحقها'))
         log(f'⚠️ إشارة {key} فاتتنا وخلصت ({h[1]}) — يسجلها التسجيل الآلي بآخر اليوم بأسعار العقد الحقيقية'); return 'خلصت'
     if hit_from(t0, first['o']): return missed(hit_from(t0, first['o']))
-    c, why = retro_pick(sym, side, first['o'], t0, now, st)
+    sel, why = retro_pick(sym, side, first['o'], t0, now, st, a); c = sel and sel['c']
     rec = dict(key=key, day=datetime.fromtimestamp(t0, NY).date().isoformat(), symbol=sym, side=side, t_entry=t0, atr=a, retro=True, fire_id=fire_id, ntfy_http=wh)
     if c:
         sbar = next((b for b in sb if b['t'] == c['t']), None)             # السهم: افتتاح نفس دقيقة صفقة العقد
@@ -292,9 +312,10 @@ def retro_enter(st, sig, now, fire_id=None, wh=None):
         e = sbar['o']; h = hit_from(c['t'], e)
         if h: return missed(h)
         target, stop = levels(e); d = c['t'] - t0
-        rec.update(entry=round(e, 2), target=target, stop=stop, expiry=c['exp'].isoformat(), strike=c['K'], opt_entry=c['p'], opt_entry_hi=c['hi'], opt_entry_at=int(c['t']),
-                   opt_entry_vol=c['vol'], src=f"سعر صفقة حقيقية على العقد (OPRA، TradingView) بعد الإشارة بـ {d // 60} دقيقة و{d % 60} ثانية؛ السهم: افتتاح نفس الدقيقة؛ حجم العقد {c['vol']}")
-        log('دخول بأثر رجعي', sym, side, c['K'], c['exp'], f"{c['p'] * 100:.0f}$", 'حجم', c['vol'])
+        rec.update(entry=round(e, 2), target=target, stop=stop, expiry=c['exp'].isoformat(), strike=c['K'], opt_entry=c['price'], opt_entry_hi=c['hi'], opt_entry_at=int(c['t']),
+                   opt_entry_vol=c['vol'], src=f"سعر صفقة حقيقية على العقد (OPRA، TradingView) بعد الإشارة بـ {d // 60} دقيقة و{d % 60} ثانية؛ السهم: افتتاح نفس الدقيقة؛ حجم العقد {c['vol']}",
+                   **cs.record_fields(sel))
+        log('دخول بأثر رجعي', sym, side, c['K'], c['exp'], f"{c['price'] * 100:.0f}$", '|', sel['why'])
     else:
         target, stop = levels(first['o'])
         rec.update(entry=round(first['o'], 2), target=target, stop=stop, t_exit=int(now), why='بدون عقد',
@@ -396,15 +417,15 @@ def enter(st, t, now):
     key = f"{t['symbol']}-{t['t_entry']}"
     if any(x['key'] == key for x in st['trades']): return
     if any(x['symbol'] == t['symbol'] and not x.get('t_exit') for x in st['trades']): return
-    c = pick_contract(t['symbol'], t['side'], t['entry'], now)
+    c = choose_contract(t['symbol'], t['side'], t['entry'], t['atr'], now, st)
     rec = dict(key=key, day=datetime.fromtimestamp(now, NY).date().isoformat(), symbol=t['symbol'], side=t['side'],
                t_entry=t['t_entry'], entry=t['entry'], target=t['target'], stop=t['stop'], atr=t['atr'])
     if c:
-        exp, K, p = c
-        rec.update(expiry=exp.isoformat(), strike=K, opt_entry=p, opt_entry_at=int(now), src='أبيان لحظي')
-        log('دخول', t['symbol'], t['side'], K, exp, f'{p * 100:.0f}$')
+        x = c['c']
+        rec.update(expiry=x['exp'].isoformat(), strike=x['K'], opt_entry=x['price'], opt_entry_at=int(now), src='أبيان لحظي', **cs.record_fields(c))
+        log('دخول', t['symbol'], t['side'], x['K'], x['exp'], f"{x['price'] * 100:.0f}$", '|', c['why'])
     else:
-        rec.update(note='ما لقيت عقد 100–1000$ في أبيان', t_exit=int(now), why='بدون عقد'); log('دخول بدون عقد', key)
+        rec.update(note='ما لقيت ولا عقد ضمن 100–1000$ بين مرشحي أبيان (3 تواريخ)', t_exit=int(now), why='بدون عقد'); log('دخول بدون عقد', key)
     st['trades'].append(rec); save(st, f"لحظي: دخول {t['symbol']} {t['side']}")
 
 
@@ -430,8 +451,8 @@ def main():
     if a.test:   # اختبار: سعر السهم واختيار العقد من أبيان
         t0 = time.time(); update_tv(time.time())
         log('شموع TradingView: آخر شمعة', f.load_data()[a.test[0]][-1], f'({time.time() - t0:.1f} ثانية)')
-        t0 = time.time(); S = stock_px(a.test[0]); c = pick_contract(a.test[0], a.test[1], S, time.time())
-        log(a.test, 'السهم', S, '← العقد', c and (c[0].isoformat(), c[1], f'{c[2] * 100:.0f}$'), f'({time.time() - t0:.1f} ثانية)')
+        t0 = time.time(); S = stock_px(a.test[0]); c = choose_contract(a.test[0], a.test[1], S, 0.02 * S / 3, time.time(), load())
+        log(a.test, 'السهم', S, '← العقد', c and (c['c']['exp'].isoformat(), c['c']['K'], f"{c['c']['price'] * 100:.0f}$", c['why']), f'({time.time() - t0:.1f} ثانية)')
         save(load(), 'لحظي: اختبار'); return
     st = load(); log('مصدر الإشارات:', ('سجل تنبيهات TradingView (أساسي)' + (' + ntfy (سريع)' if WEBHOOK else '')) if SIGNAL_ALERTS else 'طلب الشموع من TradingView'); last_bar = None; closed = None; last_rec = 0.0; last_keep = 0.0; tl = dict(bar=None, due=0.0, tries=0, done=False)
     while True:

@@ -582,6 +582,9 @@ def cmd_live_week(a, _data):
                 pct = 100 * t['opt_usd'] / (t['opt_entry'] * 100 + COMM)
                 res = f"{'✅' if t['opt_usd'] > 0 else '❌'} {t['opt_usd']:+,.0f}$ ({pct:+.0f}%)"
             L.append(f"|{n}|{DAYS[d.weekday()]} {d:%d/%m}|{t['symbol']}|{kind}|{con}|{pin}|{WHY.get(t['why'], t['why'])}|{pout}|{res}|")
+    why = [(n, t) for n, t in enumerate(ts, 1) if t.get('why_chosen')] if ts else []
+    if why:      # (24 نوفمبر) ليش انختار العقد: دلتا، حجم، OI، سبريد، نسبة ربح/خسارة، وأي فلتر تخفف
+        L += ['', '### ليش انختار كل عقد', *[f"- #{n} {t['symbol']} {t['strike']:g}: {t['why_chosen']}" + (f" — ⚠️ تخفف: {'، '.join(t['filters_relaxed'])}" if t.get('filters_relaxed') else '') for n, t in why]]
     alld = [t for t in tr if t.get('opt_usd') is not None]
     if alld:
         L += ['', f"**من بداية التسجيل اللحظي بأسعار أبيان:** {sum(t['opt_usd'] for t in alld):+,.0f}$ على {len(alld)} صفقة، ربحت {sum(t['opt_usd'] > 0 for t in alld)}."]
