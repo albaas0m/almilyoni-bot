@@ -1,4 +1,6 @@
 {
- "fails": 0,
- "until": 0
+ "fails": 1,
+ "until": 1795537862.879638,
+ "last_error": "TradingView رجّع نص مو بيانات: tool_pre_invoke blocked by plugin ToolQuotaPlugin: TOOL_QUOTA_EXCEEDED - Tool call quota exceeded (MCP cooldown is currently active. You can make another call in 8 mins,",
+ "at": 1795536062
 }
