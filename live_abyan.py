@@ -69,10 +69,10 @@ def expiries(sym, d0):
     return main + sorted([x for x in exps if 7 <= (x - d0).days <= 35 and x not in main], key=key)
 
 
-def pick_contract(sym, side, S, now, price=None):
+def pick_contract(sym, side, S, now, price=None, max_calls=None):
     """أي سترايك سعره من أبيان بين 100$ و1000$ (يقفز بالتذبذب المحسوب من سعر أبيان نفسه).
     price(sym, exp, side, K) = دالة التسعير (الافتراضي سعر أبيان الحين؛ الأثر الرجعي يمرر سعر OPRA وقت الإشارة)."""
-    price = price or opt_px
+    price = price or opt_px; calls = [0]
     inc = 2.5 if S < 250 else 5.0; step = inc if side == 'C' else -inc
     for exp in expiries(sym, datetime.fromtimestamp(now, NY).date())[:3]:
         K = math.ceil(S / inc) * inc if side == 'C' else math.floor(S / inc) * inc
@@ -80,7 +80,8 @@ def pick_contract(sym, side, S, now, price=None):
         while queue and len(seen) < MAX_STRIKES:
             K = queue.pop(0)
             if K <= 0 or K in seen: continue
-            seen.add(K); p = price(sym, exp, side, K)
+            if max_calls is not None and calls[0] >= max_calls: log(f'⚠️ وصلت سقف طلبات التسعير ({max_calls}) بدون عقد مناسب'); return None
+            seen.add(K); calls[0] += 1; p = price(sym, exp, side, K)
             if not p: queue += [round(K + step, 2), round(K - step, 2)]; continue
             if m.PREM_MIN <= p * 100 and p * 100 + m.COMM <= m.BUDGET: return exp, K, p
             too_exp = p * 100 + m.COMM > m.BUDGET
@@ -99,13 +100,13 @@ def pick_contract(sym, side, S, now, price=None):
 NTFY_TOPIC = os.environ.get('NTFY_TOPIC', ''); NTFY_KEY = os.environ.get('NTFY_KEY', '')
 SIGNAL_ALERTS = (ROOT / 'webhook_on').exists()
 WEBHOOK = bool(NTFY_TOPIC) and SIGNAL_ALERTS
-TVLOG_TOOL, TVLOG_DELAY, STALE_SEC = 'mcp-tv-get-alerts-log', 35, 600
+TVLOG_TOOL, TVLOG_DELAY, STALE_SEC, RETRO_MAX_CALLS = 'mcp-tv-get-alerts-log', 35, 240, 8
 if SIGNAL_ALERTS:
     # (21 نوفمبر، طلب أحمد) الـ8 أسهم كلها. (24 نوفمبر) وSYMBOLS معها: التسجيل الليلي يحمّل شموع الـ8، وإلا AVGO/LRCX/TSM/ARM ما تتسجل أبداً
     m.TRADE_SYMBOLS = list(m.ALL_TRADE_SYMBOLS); m.SYMBOLS = m.TRADE_SYMBOLS + ['SPY']
 
 
-def parse_alert(x, src):
+def parse_alert(x, src, now=None):
     """يفك رسالة التنبيه {k,sym,side,t,c,atr} (نفس المنطق لـ ntfy وسجل TradingView) ويتحقق من NTFY_KEY.
     يرجع dict(symbol, side, t, atr, c) أو None (ويكتب السبب — ما نسكت)."""
     if not isinstance(x, dict): log(f'⚠️ [{src}] تنبيه مو مفهوم:', str(x)[:120]); return None
@@ -114,8 +115,11 @@ def parse_alert(x, src):
     try: side = {1: 'C', -1: 'P'}.get(side, side)                 # alertcondition يرسل 1/-1 (1.0 نفس 1 في القاموس)
     except TypeError: pass
     if sym not in m.TRADE_SYMBOLS or side not in ('C', 'P'): return None
-    try: return dict(symbol=sym, side=side, t=int(float(x['t'])), atr=float(x['atr']), c=x.get('c'))
+    try: t = float(x['t']); atr = float(x['atr'])
     except (KeyError, TypeError, ValueError): log(f'⚠️ [{src}] تنبيه ناقص t/atr:', str(x)[:120]); return None
+    if t > 1e11: t /= 1000                                         # لو جاء بالملي ثانية
+    if now is not None and t - now > 60: log(f'⚠️ [{src}] تنبيه من المستقبل ({t - now:.0f} ثانية)، تجاهلته:', sym); return None
+    return dict(symbol=sym, side=side, t=int(t), atr=atr, c=x.get('c'))
 
 
 def sig_key(sig): return f"{sig['symbol']}-{sig['t']}"
@@ -144,19 +148,20 @@ def webhook_signals(now, st):
     url = f'https://ntfy.sh/{urllib.parse.quote(NTFY_TOPIC)}/json?poll=1&since={urllib.parse.quote(str(since))}'
     with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'almilyoni-bot/1'}), timeout=20) as r:
         lines = r.read().decode().splitlines()
-    out = []
+    out = []; batch = set()
     for ln in lines:
         try: ev = json.loads(ln)
         except ValueError: continue
         if ev.get('event') != 'message': continue
-        w['last_id'] = ev['id']
         try: x = json.loads(ev.get('message', ''))
-        except ValueError: log('⚠️ تنبيه مو مفهوم:', ev.get('message', '')[:120]); continue
-        sig = parse_alert(x, 'ntfy')
-        if not sig: continue
-        if is_seen(st, sig): continue                                 # وصل من السجل قبل
-        if now - sig['t'] > STALE_SEC: log('تنبيه قديم، تجاهلته:', sig['symbol'], sig['side']); continue
-        t = build_signal(sig, now); t['sig'] = sig
+        except ValueError: log('⚠️ تنبيه مو مفهوم:', ev.get('message', '')[:120]); w['last_id'] = ev['id']; continue
+        sig = parse_alert(x, 'ntfy', now)
+        if not sig or is_seen(st, sig) or sig_key(sig) in batch: w['last_id'] = ev['id']; continue      # seen = وصل من السجل قبل
+        if now - sig['t'] > STALE_SEC: log('تنبيه قديم، تجاهلته (السجل/الأثر الرجعي يغطيه):', sig['symbol'], sig['side']); w['last_id'] = ev['id']; continue
+        try: t = build_signal(sig, now)
+        except Exception as e:                                 # فشل أبيان: نوقف عند هالإشارة ونعيد الدورة الجاية (last_id ما تقدم)، واللي قبلها ما يضيع
+            log('⚠️ فشل سعر أبيان لإشارة ntfy، أعيد الدورة الجاية:', sig['symbol'], repr(e)[:150]); break
+        batch.add(sig_key(sig)); w['last_id'] = ev['id']; t['sig'] = sig
         log('📩 إشارة من ntfy:', t['symbol'], t['side'], 'سعر أبيان', t['entry'])
         out.append(t)
     return out
@@ -176,28 +181,33 @@ def tv_count(u, n=1): u['n'] = u.get('n', 0) + n               # نحسبه قب
 
 
 def tvlog_signals(now, st):
-    """يقرا سجل التنبيهات (يوم واحد، 50 حدث) ويرجع (حيّة، فايتة): حيّة = أقدم من STALE_SEC ما تنطبق، فايتة = اليوم بس تأخرت (تتسجل بأثر رجعي)."""
+    """يقرا سجل التنبيهات (يوم واحد، 100 حدث) ويرجع (حيّة، فايتة، فاشلة-مؤقتاً): حيّة = أقدم من STALE_SEC ما تنطبق، فايتة = اليوم بس تأخرت (تتسجل بأثر رجعي)."""
     u = tv_budget(now, st); tv_count(u)
-    r = tv.call(TVLOG_TOOL, {'days': 1, 'limit': 50})
+    r = tv.call(TVLOG_TOOL, {'days': 1, 'limit': 100})
     evs = r.get('events') if isinstance(r, dict) else None
     if not isinstance(evs, list): raise RuntimeError(f'رد سجل التنبيهات مو مفهوم: {str(r)[:200]}')
     st['tvlog'] = dict(last_ok=int(now), events=len(evs))
-    today = datetime.fromtimestamp(now, NY).date(); live, late = [], []
+    today = datetime.fromtimestamp(now, NY).date(); live, late, failed = [], [], []; batch = set()
     for ev in sorted(evs, key=lambda e: e.get('fired_at') or ''):
         try: x = json.loads(ev.get('message') or '')
         except ValueError: log('⚠️ [سجل TradingView] رسالة مو JSON:', str(ev.get('message'))[:120]); continue
-        sig = parse_alert(x, 'سجل TradingView')
+        sig = parse_alert(x, 'سجل TradingView', now)
         if not sig: continue
         fid = ev.get('fire_id')
-        if is_seen(st, sig, fid): continue
+        if is_seen(st, sig, fid) or sig_key(sig) in batch or (fid is not None and fid in batch): continue      # تكرار داخل نفس الرد
+        batch.add(sig_key(sig)); fid is not None and batch.add(fid)
         age = now - sig['t']
         if age <= STALE_SEC:
-            t = build_signal(sig, now); t.update(sig=sig, fire_id=fid, wh=(ev.get('webhook') or {}).get('http_code'))
+            wh = (ev.get('webhook') or {}).get('http_code')
+            try: t = build_signal(sig, now)
+            except Exception as e:                                 # فشل أبيان لإشارة وحدة: ما نسقط الباقي ولا نعيد طلب السجل، تنعاد من tvlog_pending
+                log('⚠️ فشل سعر أبيان لإشارة السجل، أعيد كل دقيقة بدون TradingView:', sig['symbol'], repr(e)[:150]); failed.append(dict(sig=sig, fire_id=fid, wh=wh)); continue
+            t.update(sig=sig, fire_id=fid, wh=wh)
             log('📋 إشارة من سجل TradingView:', t['symbol'], t['side'], 'fire_id', fid, '| ntfy:', t['wh'], '| سعر أبيان', t['entry']); live.append(t)
         elif datetime.fromtimestamp(sig['t'], NY).date() == today:
             late.append(dict(sig=sig, fire_id=fid, wh=(ev.get('webhook') or {}).get('http_code')))
         else: mark_seen(st, now, sig, fid)
-    return live, late
+    return live, late, failed
 
 
 def iso(t): return datetime.fromtimestamp(t, UTC).strftime('%Y-%m-%dT%H:%M:%SZ')
@@ -207,7 +217,7 @@ def tv_bars(sym, t0, t1, n=500):
     r = tv.call(tv.OHLCV, dict(symbol=sym, interval='1m', date_from=iso(t0), date_to=iso(t1), format='columns', count=n))
     c = r.get('bars') or {}
     if isinstance(c, list): return [b for b in c if 't' in b]
-    return [dict(t=c['t'][i], o=c['o'][i], h=c['h'][i], l=c['l'][i], c=c['c'][i], v=c['v'][i]) for i in range(len(c.get('t', [])))]
+    return [dict(t=c['t'][i], o=c['o'][i], h=c['h'][i], l=c['l'][i], c=c['c'][i], v=(c.get('v') or [0] * len(c['t']))[i]) for i in range(len(c.get('t', [])))]
 
 
 def opra(sym, exp, side, K): return f"OPRA:{sym}{exp:%y%m%d}{side}{K:.1f}"      # نفس tv_record.tv_symbol
@@ -237,7 +247,7 @@ def retro_enter(st, sig, now, fire_id=None, wh=None):
         if not bs: return None
         b = min(bs, key=lambda b: (abs(b['t'] - t0), b['t'] < t0))              # أقرب صفقة حقيقية للإشارة (الأقرب بعد الإشارة عند التعادل)
         info[(exp, K)] = b; return b['c']
-    c = pick_contract(sym, side, e, t0, price=price)
+    c = pick_contract(sym, side, e, t0, price=price, max_calls=RETRO_MAX_CALLS)
     rec = dict(key=key, day=datetime.fromtimestamp(t0, NY).date().isoformat(), symbol=sym, side=side, t_entry=t0, entry=round(e, 2),
                target=target, stop=stop, atr=a, retro=True, fire_id=fire_id, ntfy_http=wh)
     if c:
@@ -253,16 +263,36 @@ def retro_enter(st, sig, now, fire_id=None, wh=None):
 def tvlog_step(now, st, tl):
     """قراءة السجل لشمعة وحدة: فشلت → تحذير واضح وإعادة بعد دقيقة (لين تنتهي الشمعة). ممنوع السكوت."""
     try:
-        live, late = tvlog_signals(now, st)
+        live, late, failed = tvlog_signals(now, st)
     except (Exception, SystemExit) as e:                      # SystemExit: فشل توكن TradingView — ما نقتل الجوب (ntfy وأبيان يكملون)
         tl['tries'] += 1; tl['due'] = now + 60
         log(f"{'❌' if tl['tries'] >= 3 else '⚠️'} فشل قراءة سجل تنبيهات TradingView (محاولة {tl['tries']}): {e!r:.300} — أعيد بعد دقيقة")
         if tl['due'] >= (tl['bar'] + 1) * 900: log('❌ ما قدرت أقرا سجل التنبيهات هالشمعة كلها: أي إشارة فايتة تنلحق بالقراءة الجاية (أثر رجعي) لو لسا اليوم')
         return
-    tl['done'] = True; log(f"سجل التنبيهات: {st['tvlog']['events']} حدث، حيّة {len(live)}، فايتة {len(late)}")
+    tl['done'] = True; log(f"سجل التنبيهات: {st['tvlog']['events']} حدث، حيّة {len(live)}، فايتة {len(late)}، مؤجلة {len(failed)}")
+    have = {sig_key(P['sig']) for P in tl.get('pending', [])}; tl['pending'] = tl.get('pending', []) + [P for P in failed if sig_key(P['sig']) not in have]
     for t in live:
         try: enter(st, t, now); mark_seen(st, now, t['sig'], t.get('fire_id'))
         except Exception: log('⚠️ فشل الدخول على إشارة السجل (أعيد بالقراءة الجاية):', traceback.format_exc()[-400:])
+    tvlog_late(now, st, late)
+
+
+def tvlog_pending(now, st, tl):
+    """إشارات السجل اللي فشل سعر أبيان لها: نعيد كل دقيقة بدون طلب TradingView جديد؛ لو عدّى STALE_SEC تروح للأثر الرجعي."""
+    left, late = [], []
+    for P in tl.get('pending', []):
+        sig = P['sig']
+        if is_seen(st, sig, P['fire_id']): continue
+        if now - sig['t'] > STALE_SEC: late.append(P); continue
+        try:
+            t = build_signal(sig, now); t.update(sig=sig, fire_id=P['fire_id'], wh=P['wh'])
+            enter(st, t, now); mark_seen(st, now, sig, P['fire_id'])
+        except Exception as e: log('⚠️ إعادة سعر أبيان فشلت:', sig['symbol'], repr(e)[:150]); left.append(P)
+    tl['pending'] = left
+    if late: tvlog_late(now, st, late)
+
+
+def tvlog_late(now, st, late):
     for L in late:
         fails = st.setdefault('retro_fail', {}); k = sig_key(L['sig'])
         try:
@@ -396,6 +426,7 @@ def main():
                         except Exception as e: log('⚠️ قراءة ntfy فشلت (السجل يغطي):', repr(e)[:200])
                     if tl['bar'] != bar: tl.update(bar=bar, due=bar * 900 + TVLOG_DELAY, tries=0, done=False)     # السجل: مرة بعد إغلاق كل شمعة بـ 35 ثانية
                     if not tl['done'] and now >= tl['due']: tvlog_step(now, st, tl)
+                    if tl.get('pending'): tvlog_pending(now, st, tl)
             elif 0 <= mins <= m.LATE_MIN + 1 and bar != last_bar and now % 900 >= 25:   # 25 ثانية بعد إغلاق الشمعة
                 last_bar = bar
                 for t in new_signals(now, st): enter(st, t, now)
