@@ -39,31 +39,48 @@ tv.call = lambda tool, args: dict(events=[bad])
 (lv, lt, _f), out = run(L.tvlog_signals, T0 + 40, {'trades': []})
 check('رمز غلط يُتجاهل مع تحذير', not lv and not lt and 'برمز غلط' in out)
 
-# 3) إشارة فايتة (بعد 25 دقيقة) → أثر رجعي بأسعار OPRA
-exp = date(2026, 12, 7)
+# 3) إشارة فايتة → أثر رجعي بأرقام حقيقية بس (صفقة قبل الإشارة لازم تنرفض)
 import importlib; importlib.reload(L); L.NTFY_KEY = 'KEY'; L.save = lambda st, msg, data=False: None
-L.expiries = lambda sym, d0: [exp]
-OPT = {'OPRA:AVGO261207C310.0': [dict(t=T0 - 240, o=12.18, h=12.18, l=12.18, c=12.18, v=1), dict(t=T0, o=14.74, h=14.74, l=14.13, c=14.13, v=6)],
-       'OPRA:AVGO261207C315.0': [dict(t=T0 + 180, o=9.4, h=9.4, l=9.4, c=9.4, v=2)]}                 # (بيانات اختبار، مو أسعار البوت)
-STK = dict(t=[T0, T0 + 60, T0 + 120], o=[307.96, 308.1, 308.4], h=[308.5, 308.6, 309.0], l=[307.4, 307.9, 308.0], c=[308.1, 308.4, 308.9], v=[5, 5, 5])
+exp = date(2026, 12, 7); L.expiries = lambda sym, d0: [exp]
+from datetime import datetime, timezone
+def ts(x): return int(datetime.strptime(x, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp())
+def bar(t, p, v): return dict(t=t, o=p, h=p, l=p, c=p, v=v)
+OPT = {}                                                  # (بيانات اختبار، مو أسعار البوت)
+STK = [dict(t=T0, o=307.96, h=308.5, l=307.4, c=308.1, v=5), dict(t=T0 + 60, o=308.1, h=308.6, l=307.9, c=308.4, v=5), dict(t=T0 + 120, o=308.4, h=309.0, l=308.0, c=308.9, v=5)]
+reqs = []
+def cols(bs): return dict(bars=dict(t=[x['t'] for x in bs], o=[x['o'] for x in bs], h=[x['h'] for x in bs], l=[x['l'] for x in bs], c=[x['c'] for x in bs], v=[x['v'] for x in bs]))
 def fake(tool, args):
     if tool == 'mcp-tv-get-alerts-log': return dict(events=[EV])
-    if args['symbol'].startswith('OPRA:'):
-        b = OPT.get(args['symbol'], []); return dict(bars=dict(t=[x['t'] for x in b], o=[x['o'] for x in b], h=[x['h'] for x in b], l=[x['l'] for x in b], c=[x['c'] for x in b], v=[x['v'] for x in b]))
-    return dict(bars=STK)
+    reqs.append(args['symbol']); lo, hi = ts(args['date_from']), ts(args['date_to'])
+    src = OPT.get(args['symbol'], []) if args['symbol'].startswith('OPRA:') else STK
+    return cols([b for b in src if lo <= b['t'] <= hi])
 tv.call = fake
+OPT.update({'OPRA:AVGO261207C310.0': [bar(T0 - 240, 8.0, 6)],                       # صفقة قبل الإشارة بـ 4 دقايق (في الميزانية) ← لازم تنرفض
+            'OPRA:AVGO261207C305.0': [bar(T0 - 600, 9.0, 3), bar(T0 + 60, 9.5, 8)],  # حجم 11، أول صفقة بعد الإشارة 9.5
+            'OPRA:AVGO261207C300.0': [bar(T0 + 120, 9.9, 20)],                      # الأعلى حجم
+            'OPRA:AVGO261207C315.0': [bar(T0 + 400, 9.0, 50)]})                     # بعد 6 دقايق (برا النافذة) ← ينرفض
 st = {'trades': []}; now = T0 + 25 * 60
 (live, late, _f), out = run(L.tvlog_signals, now, st)
 check('إشارة فايتة (مو حيّة)', not live and len(late) == 1)
 r, out = run(L.retro_enter, st, late[0]['sig'], now, late[0]['fire_id'], late[0]['wh'])
 t = st['trades'][-1] if st['trades'] else {}
-print('   ', {k: t.get(k) for k in ('symbol', 'side', 'entry', 'strike', 'expiry', 'opt_entry', 'src')})
-check('سُجلت بأثر رجعي بسعر العقد الحقيقي (C315 = 9.4$ ← 940$)', r == 'سُجلت' and t.get('opt_entry') == 9.4 and t.get('strike') == 315.0 and t.get('retro'))
-check('سعر السهم = افتتاح دقيقة الإشارة 307.96 والمصدر مكتوب', t.get('entry') == 307.96 and 'OPRA' in t.get('src', ''))
-check('عداد tv_calls يحسب الطلبات', st['tv_calls']['n'] >= 3)
-(live, late, _f), _ = run(L.tvlog_signals, now, {'trades': st['trades'], 'seen': {}})
+print('   ', {k: t.get(k) for k in ('strike', 'expiry', 'entry', 'target', 'stop', 'opt_entry', 'opt_entry_at', 'opt_entry_vol', 'src')})
+check('صفقة قبل الإشارة (C310 = 8.0$) انرفضت', t.get('strike') != 310.0 and t.get('opt_entry') != 8.0)
+check('اختار الأعلى حجم داخل النافذة (C300، 9.9$، حجم 20)', r == 'سُجلت' and t.get('strike') == 300.0 and t.get('opt_entry') == 9.9 and t.get('opt_entry_vol') == 20)
+check('opt_entry_at = وقت أول صفقة حقيقية بعد الإشارة', t.get('opt_entry_at') == T0 + 120 and t['opt_entry_at'] >= T0)
+check('السهم = افتتاح نفس الدقيقة (308.4) والهدف/الوقف منها', t.get('entry') == 308.4 and abs(t['target'] - (308.4 + 2 * 4.343358735949126)) < .01 and abs(t['stop'] - (308.4 - 3 * 4.343358735949126)) < .01)
+check('المصدر مكتوب (صفقة حقيقية بعد الإشارة)', 'بعد الإشارة' in t.get('src', '') and 'OPRA' in t['src'])
+check('الطلبات ≤ 1 سهم + 8 عقود، والعداد يحسبها', len(reqs) <= 9 and st['tv_calls']['n'] == len(reqs) + 1)   # +1 قراءة السجل
 r2, _ = run(L.retro_enter, {'trades': st['trades']}, late[0]['sig'], now)
 check('ما تتكرر الصفقة الفايتة', r2 == 'موجودة')
+# ما فيه ولا عقد عليه صفقة بعد الإشارة → بدون عقد + سبب، ولا رقم تقريبي
+OPT.clear(); OPT.update({'OPRA:AVGO261207C310.0': [bar(T0 - 240, 8.0, 6)], 'OPRA:AVGO261207C305.0': [bar(T0 - 100, 8.5, 9)]}); reqs.clear()
+st = {'trades': []}; r, out = run(L.retro_enter, st, late[0]['sig'], now); t = st['trades'][-1]
+check('بدون عقد حقيقي: لا opt_entry والسبب مكتوب', t.get('why') == 'بدون عقد' and 'opt_entry' not in t and 'ما فيه صفقة خلال 5 دقايق' in t.get('note', '') and len(reqs) <= 9)
+# سيولة ضعيفة (حجم < 5) تنرفض
+OPT.clear(); OPT.update({'OPRA:AVGO261207C310.0': [bar(T0 + 30, 9.0, 2)]}); reqs.clear()
+st = {'trades': []}; r, out = run(L.retro_enter, st, late[0]['sig'], now); t = st['trades'][-1]
+check('عقد سيولته ضعيفة (حجم 2) ينرفض', 'opt_entry' not in t and 'سيولة ضعيفة' in t.get('note', ''))
 
 # 4) فشل القراءة: تحذير واضح + إعادة بعد دقيقة (ما يسكت)
 for exc in (RuntimeError('boom'), tv.QuotaError('حد'), SystemExit('التوكن انتهى')):

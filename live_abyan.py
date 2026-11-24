@@ -223,40 +223,83 @@ def tv_bars(sym, t0, t1, n=500):
 def opra(sym, exp, side, K): return f"OPRA:{sym}{exp:%y%m%d}{side}{K:.1f}"      # نفس tv_record.tv_symbol
 
 
+RETRO_WIN, RETRO_MIN_VOL = 300, 5      # نافذة الدخول بعد الإشارة (ثانية) · أقل حجم للعقد (من افتتاح الجلسة لين نهاية النافذة)
+
+
+def retro_pick(sym, side, S, t0, now, st):
+    """(24 نوفمبر، قرار أحمد: أرقام حقيقية بس) العقد المقبول لازم عليه صفقة حقيقية من وقت الإشارة لين 5 دقايق بعدها، والدخول = أول صفقة حقيقية بعد الإشارة.
+    ممنوع أي سعر قبل الإشارة. بين العقود المقبولة (100–1000$ وحجمها ≥ RETRO_MIN_VOL) نختار الأعلى حجم. الطلبات محدودة بـ RETRO_MAX_CALLS.
+    يرجع (عقد أو None، سبب الفشل). طلب واحد لكل عقد: من افتتاح الجلسة (للحجم) لين نهاية النافذة."""
+    inc = 2.5 if S < 250 else 5.0; step = inc if side == 'C' else -inc
+    d0 = datetime.fromtimestamp(t0, NY); open_t = int(d0.replace(hour=9, minute=30, second=0, microsecond=0).timestamp()); end = min(int(now), t0 + RETRO_WIN)
+    calls, why = 0, []
+    for exp in expiries(sym, d0.date())[:3]:
+        K = math.ceil(S / inc) * inc if side == 'C' else math.floor(S / inc) * inc
+        queue, seen, cands = [K], set(), []
+        while queue:
+            K = queue.pop(0)
+            if K <= 0 or K in seen: continue
+            if calls >= RETRO_MAX_CALLS: why.append(f'وصلت سقف {RETRO_MAX_CALLS} طلبات'); return best_retro(cands), '؛ '.join(why)
+            seen.add(K); calls += 1; tv_count(tv_budget(now, st))
+            bs = tv_bars(opra(sym, exp, side, K), open_t, end, 200)
+            vol = sum(b['v'] for b in bs); first = next((b for b in bs if t0 <= b['t'] <= end and b['v'] > 0), None)
+            ref = first or (bs[-1] if bs else None)                 # للتنقل بين السترايكات بس (ما يتسجل أبداً)
+            if not ref: queue += [round(K + step, 2), round(K - step, 2)]; why.append(f'{exp} {K}: ما تداول'); continue
+            px = first['o'] if first else ref['c']; cost = px * 100 + m.COMM
+            if m.PREM_MIN <= px * 100 and cost <= m.BUDGET:
+                if not first: why.append(f'{exp} {K}: ما فيه صفقة خلال 5 دقايق من الإشارة')
+                elif vol < RETRO_MIN_VOL: why.append(f'{exp} {K}: سيولة ضعيفة (حجم {vol})')
+                else: cands.append(dict(exp=exp, K=K, p=first['o'], hi=first['h'], t=first['t'], vol=vol, day_vol=vol))
+                if len(cands) < 2: queue.append(round(K - step, 2))       # الأقرب للسعر أعلى سيولة غالباً
+                continue
+            too_exp = cost > m.BUDGET; why.append(f"{exp} {K}: {'فوق' if too_exp else 'تحت'} الميزانية")
+            T = m.yearfrac(t0, exp.isoformat()); iv = m.implied_vol(px, S, K, T, side)
+            nk = f.jump_strike(side, S, K, T, iv, inc, too_exp) if iv else None
+            queue.insert(0, nk if nk else round(K + (step if too_exp else -step), 2))
+        if cands: return best_retro(cands), '؛ '.join(why)
+    return None, '؛ '.join(why) or 'ما فيه تواريخ انتهاء مناسبة'
+
+
+def best_retro(c): return max(c, key=lambda x: x['vol']) if c else None
+
+
 def retro_enter(st, sig, now, fire_id=None, wh=None):
-    """(24 نوفمبر) إشارة اليوم فاتتنا (ntfy فشل) وعدّى وقتها: نسجلها بأثر رجعي بأسعار حقيقية بس — سهم وعقد من TradingView (OPRA دقيقة بدقيقة)
-    وقت الإشارة، أو أقرب صفقة حقيقية على العقد، ونكتب المصدر والمسافة الزمنية. لو الصفقة خلصت قبل ما نلحقها يسجلها التسجيل الآلي بآخر اليوم."""
+    """(24 نوفمبر) إشارة اليوم فاتتنا (ntfy فشل) وعدّى وقتها: نسجلها بأثر رجعي بأرقام حقيقية بس من TradingView:
+    العقد (OPRA دقيقة) = أول صفقة حقيقية بعد الإشارة خلال 5 دقايق، والسهم = افتتاح نفس الدقيقة. ما نسجل أي سعر قبل الإشارة ولا تقريبي.
+    ما لقينا عقد يحقق الشروط → نكتب السبب (بدون عقد). لو الصفقة خلصت قبل ما نلحقها يسجلها التسجيل الآلي بآخر اليوم."""
     sym, side, t0 = sig['symbol'], sig['side'], sig['t']; key = f"{sym}-{t0}"
     if any(x['key'] == key for x in st['trades']): return 'موجودة'
     if any(x['symbol'] == sym and not x.get('t_exit') for x in st['trades']): log('⚠️ إشارة فايتة', key, 'وفيه صفقة مفتوحة على نفس السهم، تجاهلتها'); return 'مفتوحة'
     sgn = 1 if side == 'C' else -1; a = sig['atr']; ex = tv.EXCH[sym]
-    u = tv_budget(now, st, 2); tv_count(u)
+    tv_count(tv_budget(now, st, 1 + RETRO_MAX_CALLS))
     sb = tv_bars(f'{ex}:{sym}', t0, int(now))
     first = next((b for b in sb if b['t'] >= t0), None)
     if not first: raise RuntimeError(f'ما فيه شموع دقيقة لـ {sym} من وقت الإشارة')
-    e = first['o']; target, stop = round(e + sgn * m.TGT * a, 2), round(e - sgn * m.STP * a, 2)
-    hit = next(((b['t'], 'وقف' if sgn * (b['l' if sgn > 0 else 'h'] - stop) <= 0 else 'هدف') for b in sb if b['t'] >= t0 and
-                (sgn * (b['l' if sgn > 0 else 'h'] - stop) <= 0 or sgn * (b['h' if sgn > 0 else 'l'] - target) >= 0)), None)
-    if hit:
-        st.setdefault('missed', []).append(dict(key=key, symbol=sym, side=side, t_entry=t0, fire_id=fire_id, why=f'خلصت ({hit[1]}) قبل ما نلحقها'))
-        log(f'⚠️ إشارة {key} فاتتنا وخلصت ({hit[1]}) — يسجلها التسجيل الآلي بآخر اليوم بأسعار العقد الحقيقية'); return 'خلصت'
-    info = {}
-    def price(s_, exp, sd, K):
-        tv_count(tv_budget(now, st))                                           # كل سترايك = طلب، ويتحسب
-        bs = tv_bars(opra(s_, exp, sd, K), t0 - 3600, min(int(now), t0 + 1800), 100)
-        if not bs: return None
-        b = min(bs, key=lambda b: (abs(b['t'] - t0), b['t'] < t0))              # أقرب صفقة حقيقية للإشارة (الأقرب بعد الإشارة عند التعادل)
-        info[(exp, K)] = b; return b['c']
-    c = pick_contract(sym, side, e, t0, price=price, max_calls=RETRO_MAX_CALLS)
-    rec = dict(key=key, day=datetime.fromtimestamp(t0, NY).date().isoformat(), symbol=sym, side=side, t_entry=t0, entry=round(e, 2),
-               target=target, stop=stop, atr=a, retro=True, fire_id=fire_id, ntfy_http=wh)
+    def levels(e): return round(e + sgn * m.TGT * a, 2), round(e - sgn * m.STP * a, 2)
+    def hit_from(t_in, e):
+        target, stop = levels(e)
+        return next(((b['t'], 'وقف' if sgn * (b['l' if sgn > 0 else 'h'] - stop) <= 0 else 'هدف') for b in sb if b['t'] >= t_in and
+                     (sgn * (b['l' if sgn > 0 else 'h'] - stop) <= 0 or sgn * (b['h' if sgn > 0 else 'l'] - target) >= 0)), None)
+    def missed(h):
+        st.setdefault('missed', []).append(dict(key=key, symbol=sym, side=side, t_entry=t0, fire_id=fire_id, why=f'خلصت ({h[1]}) قبل ما نلحقها'))
+        log(f'⚠️ إشارة {key} فاتتنا وخلصت ({h[1]}) — يسجلها التسجيل الآلي بآخر اليوم بأسعار العقد الحقيقية'); return 'خلصت'
+    if hit_from(t0, first['o']): return missed(hit_from(t0, first['o']))
+    c, why = retro_pick(sym, side, first['o'], t0, now, st)
+    rec = dict(key=key, day=datetime.fromtimestamp(t0, NY).date().isoformat(), symbol=sym, side=side, t_entry=t0, atr=a, retro=True, fire_id=fire_id, ntfy_http=wh)
     if c:
-        exp, K, p = c; b = info[(exp, K)]; d = b['t'] - t0
-        how = 'وقت الإشارة' if abs(d) < 60 else f"أقرب صفقة حقيقية، {abs(d) // 60} دقيقة {'بعد' if d > 0 else 'قبل'} الإشارة"
-        rec.update(expiry=exp.isoformat(), strike=K, opt_entry=p, opt_entry_at=int(b['t']),
-                   src=f'أثر رجعي — سعر العقد الحقيقي من TradingView (OPRA دقيقة) {how}؛ سهم: افتتاح دقيقة الإشارة')
-        log('دخول بأثر رجعي', sym, side, K, exp, f'{p * 100:.0f}$', how)
-    else: rec.update(note='ما لقيت عقد 100–1000$ له تداول وقت الإشارة', t_exit=int(now), why='بدون عقد'); log('دخول بأثر رجعي بدون عقد', key)
+        sbar = next((b for b in sb if b['t'] == c['t']), None)             # السهم: افتتاح نفس دقيقة صفقة العقد
+        if not sbar: raise RuntimeError(f"ما فيه شمعة سهم بدقيقة صفقة العقد ({c['t']})")
+        e = sbar['o']; h = hit_from(c['t'], e)
+        if h: return missed(h)
+        target, stop = levels(e); d = c['t'] - t0
+        rec.update(entry=round(e, 2), target=target, stop=stop, expiry=c['exp'].isoformat(), strike=c['K'], opt_entry=c['p'], opt_entry_hi=c['hi'], opt_entry_at=int(c['t']),
+                   opt_entry_vol=c['vol'], src=f"سعر صفقة حقيقية على العقد (OPRA، TradingView) بعد الإشارة بـ {d // 60} دقيقة و{d % 60} ثانية؛ السهم: افتتاح نفس الدقيقة؛ حجم العقد {c['vol']}")
+        log('دخول بأثر رجعي', sym, side, c['K'], c['exp'], f"{c['p'] * 100:.0f}$", 'حجم', c['vol'])
+    else:
+        target, stop = levels(first['o'])
+        rec.update(entry=round(first['o'], 2), target=target, stop=stop, t_exit=int(now), why='بدون عقد',
+                   note=f'ما لقيت عقد 100–1000$ عليه صفقة حقيقية خلال 5 دقايق من الإشارة وحجمه ≥ {RETRO_MIN_VOL}: {why}')
+        log('دخول بأثر رجعي بدون عقد', key, why)
     st['trades'].append(rec); save(st, f'لحظي: دخول بأثر رجعي {sym} {side}'); return 'سُجلت'
 
 
