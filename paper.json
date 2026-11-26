@@ -1439,6 +1439,41 @@
    "time_value": 6.8,
    "skip": "",
    "drtip_skip": false
+  },
+  {
+   "id": "2026-11-24-AVGO-0",
+   "day": "2026-11-24",
+   "symbol": "AVGO",
+   "side": "C",
+   "t_entry": 1795532400,
+   "t_exit": 1795553942,
+   "entry": 307.96,
+   "target": 316.65,
+   "stop": 294.93,
+   "exit": 300.9,
+   "why": "نهاية الجلسة",
+   "stock_pct": -2.202,
+   "prev_buy_vol_pct": 47.8,
+   "ema50d": 342.43,
+   "adr": 18.593,
+   "before10": false,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": -235.0,
+   "vix_skip": null,
+   "strike": 320.0,
+   "expiry": "2026-12-04",
+   "premium": 900,
+   "exit_premium": 633,
+   "opt_usd": -269,
+   "opt_pct": -29.9,
+   "exit_price_source": "سعر أبيان اللحظي (دخول وخروج)",
+   "over_budget": false,
+   "bucket": "14",
+   "time_value": 9.0,
+   "skip": "",
+   "drtip_skip": false
   }
  ],
  "days": {
@@ -1532,6 +1567,10 @@
   },
   "2026-11-23": {
    "n": 0,
+   "updated": "2026-11-26 16:59"
+  },
+  "2026-11-24": {
+   "n": 1,
    "updated": "2026-11-26 16:59"
   }
  }
