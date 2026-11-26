@@ -1474,6 +1474,41 @@
    "time_value": 9.0,
    "skip": "",
    "drtip_skip": false
+  },
+  {
+   "id": "2026-11-25-AAPL-0",
+   "day": "2026-11-25",
+   "symbol": "AAPL",
+   "side": "P",
+   "t_entry": 1795617900,
+   "t_exit": 1795629095,
+   "entry": 348.05,
+   "target": 344.76,
+   "stop": 352.98,
+   "exit": 353.52,
+   "why": "وقف",
+   "stock_pct": -1.446,
+   "prev_buy_vol_pct": 66.3,
+   "ema50d": 341.62,
+   "adr": 7.65,
+   "before10": true,
+   "news_skip": false,
+   "news_reason": "",
+   "market_caution": false,
+   "model_opt_usd": -248.0,
+   "vix_skip": null,
+   "strike": 342.5,
+   "expiry": "2026-12-07",
+   "premium": 400,
+   "exit_premium": 339,
+   "opt_usd": -63,
+   "opt_pct": -15.6,
+   "exit_price_source": "سعر أبيان اللحظي (دخول وخروج)",
+   "over_budget": false,
+   "bucket": "14",
+   "time_value": 4.0,
+   "skip": "",
+   "drtip_skip": true
   }
  ],
  "days": {
@@ -1570,6 +1605,10 @@
    "updated": "2026-11-26 16:59"
   },
   "2026-11-24": {
+   "n": 1,
+   "updated": "2026-11-26 16:59"
+  },
+  "2026-11-25": {
    "n": 1,
    "updated": "2026-11-26 16:59"
   }
